@@ -1,0 +1,22 @@
+rule_type: PT
+rule_code: PT-JH
+state_code: JH
+state_name: Jharkhand
+versions:
+  - version: 1
+    name: Jharkhand PT (yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Jharkhand Tax on Professions, Trades, Callings and Employments Act, 2011 - verify"
+    notes: Slabs on annual income; yearly amount. Deduction month is a company choice (March used here).
+    frequency: YEARLY
+    wage_basis: ANNUAL
+    deduction_months: [3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 300000, amount: 0}
+          - {upto: 500000, amount: 1200}
+          - {upto: 800000, amount: 1800}
+          - {upto: 1000000, amount: 2100}
+          - {upto: null, amount: 2500}

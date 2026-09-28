@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-GJ v1
+rule_name: LWF-GJ
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-GJ
+source: Gujarat Labour Welfare Fund Act, 1953 - verify
+status: UNVERIFIED
+doc_type: rule

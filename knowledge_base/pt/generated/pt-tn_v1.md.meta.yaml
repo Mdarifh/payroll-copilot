@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-TN v1
+rule_name: PT-TN
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-TN
+source: Tamil Nadu Urban Local Bodies Act (half-yearly PT, revised 2024) - verify;
+  rates can differ by local body
+status: UNVERIFIED
+doc_type: rule

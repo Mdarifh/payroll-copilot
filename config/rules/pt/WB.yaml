@@ -1,0 +1,20 @@
+rule_type: PT
+rule_code: PT-WB
+state_code: WB
+state_name: West Bengal
+versions:
+  - version: 1
+    name: West Bengal PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "West Bengal State Tax on Professions, Trades, Callings and Employments Act, 1979 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 10000, amount: 0}
+          - {upto: 15000, amount: 110}
+          - {upto: 25000, amount: 130}
+          - {upto: 40000, amount: 150}
+          - {upto: null, amount: 200}

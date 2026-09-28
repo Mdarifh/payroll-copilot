@@ -1,0 +1,10 @@
+module: compliance
+document_name: Rule verification and versioning policy
+rule_name: RULE_GOVERNANCE
+version: "1"
+effective_from: 2025-04-01
+effective_to: null
+jurisdiction: IN
+source: AI Payroll Copilot design - internal
+status: UNVERIFIED
+doc_type: policy

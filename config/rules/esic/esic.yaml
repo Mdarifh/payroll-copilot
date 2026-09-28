@@ -1,0 +1,22 @@
+# ESIC contribution rule family. UNVERIFIED until checked against ESIC notifications.
+rule_type: ESIC
+rule_code: ESIC
+versions:
+  - version: 1
+    name: ESIC 0.75% / 3.25%, wage threshold ₹21,000
+    effective_from: 2019-07-01
+    effective_to: null
+    status: UNVERIFIED
+    source_ref: "ESI (Central) Rules - rates 0.75%/3.25% w.e.f. 01-07-2019; threshold ₹21,000 (₹25,000 for PwD) w.e.f. 01-01-2017"
+    notes: >-
+      Coverage is decided at the start of each contribution period (Apr-Sep, Oct-Mar);
+      an employee covered at period start stays covered until the period ends even if
+      wages cross the threshold. Contributions rounded up to the next rupee.
+    applicability:
+      - {field: esic_applicable, op: eq, value: true}
+    employee_rate: 0.75
+    employer_rate: 3.25
+    wage_threshold: 21000
+    disabled_wage_threshold: 25000
+    contribution_period_start_months: [4, 10]
+    rounding_mode: CEIL

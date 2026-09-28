@@ -1,0 +1,14 @@
+rule_type: LWF
+rule_code: LWF-WB
+state_code: WB
+state_name: West Bengal
+versions:
+  - version: 1
+    name: West Bengal LWF (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "West Bengal Labour Welfare Fund Act, 1974 - verify"
+    frequency: HALF_YEARLY
+    deduction_months: [6, 12]
+    employee_amount: 3
+    employer_amount: 15

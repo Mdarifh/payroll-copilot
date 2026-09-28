@@ -1,0 +1,34 @@
+# Income tax on salary - OLD regime, senior (60-79) and super senior (80+). UNVERIFIED.
+rule_type: TDS
+rule_code: TDS-OLD-SENIOR
+versions:
+  - version: 1
+    name: Old regime FY 2026-27 (senior 60-79)
+    financial_year: "2026-27"
+    regime: OLD
+    age_category: SENIOR
+    effective_from: 2026-04-01
+    effective_to: 2027-03-31
+    status: UNVERIFIED
+    source_ref: "Income-tax Act 2025 / Finance Act slabs for FY 2026-27 - verify"
+    standard_deduction: 50000
+    rebate_income_limit: 500000
+    rebate_max: 12500
+    cess_rate: 4
+    surcharge:
+      - {above: 5000000, rate: 10}
+      - {above: 10000000, rate: 15}
+      - {above: 20000000, rate: 25}
+      - {above: 50000000, rate: 37}
+    slabs:
+      - {upto: 300000, rate: 0}
+      - {upto: 500000, rate: 5}
+      - {upto: 1000000, rate: 20}
+      - {upto: null, rate: 30}
+    deduction_limits:   # UNVERIFIED; 1961-Act section labels
+      80C: 150000
+      80CCD(1B): 50000
+      80D: 50000
+      80TTB: 50000
+    allow_professional_tax_deduction: true
+    rounding_mode: HALF_UP

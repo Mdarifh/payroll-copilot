@@ -1,0 +1,292 @@
+# Demo payroll data for development and tests. Fictional company and people.
+# Focus month: September 2026 (30 days, Sundays 6/13/20/27 are week offs).
+# August 2026 rows exist where needed for arrears / LOP reversal.
+
+company:
+  code: DEMO
+  name: Demo Tech Pvt Ltd
+  state_code: MH
+  pf_establishment_code: MHDEM0000001000
+  esic_employer_code: "31000000000000001"
+  paid_days_basis: CALENDAR
+
+salary_heads:
+  # code, name, category, head_type + flags. Flags drive PF/ESIC/PT/tax wage bases.
+  - {code: BASIC, name: Basic, category: EARNING, head_type: FIXED, is_taxable: true, is_pf_wage: true, is_esic_wage: true, is_pt_wage: true, is_lwf_wage: true, is_prorated: true, part_of_gross: true, part_of_ctc: true, display_order: 1}
+  - {code: HRA, name: House Rent Allowance, category: EARNING, head_type: FIXED, is_taxable: true, is_esic_wage: true, is_pt_wage: true, is_lwf_wage: true, is_prorated: true, part_of_gross: true, part_of_ctc: true, display_order: 2}
+  - {code: SPECIAL, name: Special Allowance, category: EARNING, head_type: FIXED, is_taxable: true, is_esic_wage: true, is_pt_wage: true, is_lwf_wage: true, is_prorated: true, part_of_gross: true, part_of_ctc: true, display_order: 3}
+  - {code: CONVEYANCE, name: Conveyance Allowance, category: EARNING, head_type: FIXED, is_taxable: true, is_esic_wage: true, is_pt_wage: true, is_lwf_wage: true, is_prorated: true, part_of_gross: true, part_of_ctc: true, display_order: 4}
+  - {code: MEDICAL, name: Medical Allowance, category: EARNING, head_type: FIXED, is_taxable: true, is_esic_wage: true, is_pt_wage: true, is_lwf_wage: true, is_prorated: true, part_of_gross: true, part_of_ctc: true, display_order: 5}
+  - {code: BONUS, name: Bonus, category: EARNING, head_type: VARIABLE, is_taxable: true, is_pt_wage: true, part_of_gross: true, part_of_ctc: true, display_order: 6}
+  - {code: OTHER_EARNING, name: Other Earnings, category: EARNING, head_type: ADHOC, is_taxable: true, is_pt_wage: true, part_of_gross: true, display_order: 7}
+  - {code: LEAVE_ENCASH, name: Leave Encashment, category: EARNING, head_type: ADHOC, is_taxable: true, part_of_gross: true, display_order: 8}
+
+  - {code: EE_PF, name: Employee PF, category: DEDUCTION, head_type: STATUTORY, display_order: 20}
+  - {code: EE_ESIC, name: Employee ESIC, category: DEDUCTION, head_type: STATUTORY, display_order: 21}
+  - {code: PT, name: Professional Tax, category: DEDUCTION, head_type: STATUTORY, display_order: 22}
+  - {code: TDS, name: Income Tax (TDS), category: DEDUCTION, head_type: STATUTORY, display_order: 23}
+  - {code: LWF_EE, name: Employee LWF, category: DEDUCTION, head_type: STATUTORY, display_order: 24}
+  - {code: LOAN, name: Loan Recovery, category: DEDUCTION, head_type: ADHOC, display_order: 25}
+  - {code: OTHER_DED, name: Other Deductions, category: DEDUCTION, head_type: ADHOC, display_order: 26}
+  - {code: NOTICE_RECOVERY, name: Notice Pay Recovery, category: DEDUCTION, head_type: ADHOC, display_order: 27}
+
+  - {code: ER_EPF, name: Employer EPF, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 40}
+  - {code: EPS, name: Employer EPS, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 41}
+  - {code: EDLI, name: EDLI, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 42}
+  - {code: EPF_ADMIN, name: EPF Admin Charges, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 43}
+  - {code: ER_ESIC, name: Employer ESIC, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 44}
+  - {code: LWF_ER, name: Employer LWF, category: EMPLOYER_CONTRIBUTION, head_type: STATUTORY, part_of_ctc: true, display_order: 45}
+
+salary_structures:
+  - code: STD-2026
+    version: 1
+    name: Standard structure
+    description: Basic 50% of gross, HRA 50% of Basic, fixed conveyance & medical, Special balances.
+    effective_from: 2025-04-01
+    components:
+      - {head_code: BASIC, calc_type: PERCENT_OF_GROSS, value: 50, sequence: 1}
+      - {head_code: HRA, calc_type: PERCENT_OF_HEAD, value: 50, base_head_code: BASIC, sequence: 2}
+      - {head_code: CONVEYANCE, calc_type: FIXED, value: 1600, sequence: 3}
+      - {head_code: MEDICAL, calc_type: FIXED, value: 1250, sequence: 4}
+      - {head_code: SPECIAL, calc_type: BALANCING, sequence: 5}
+  - code: LOW-2026
+    version: 1
+    name: Low wage structure
+    description: Basic 60% of gross, HRA 40% of Basic, Special balances.
+    effective_from: 2025-04-01
+    components:
+      - {head_code: BASIC, calc_type: PERCENT_OF_GROSS, value: 60, sequence: 1}
+      - {head_code: HRA, calc_type: PERCENT_OF_HEAD, value: 40, base_head_code: BASIC, sequence: 2}
+      - {head_code: SPECIAL, calc_type: BALANCING, sequence: 3}
+
+employees:
+  - employee_code: ARIF-112
+    scenario: Normal employee, PF above new ₹25,000 ceiling, no ESIC
+    full_name: Arif Sharma
+    gender: M
+    dob: 1990-05-14
+    doj: 2022-04-01
+    work_state: MH
+    department: Engineering
+    designation: Senior Engineer
+    uan: "100000000112"
+    pf_join_date: 2022-04-01
+    tax_regime: NEW
+    salary:
+      - structure: STD-2026
+        monthly_gross: 60000
+        effective_from: 2026-04-01
+        reason: REVISION
+        components: {BASIC: 30000, HRA: 15000, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 12150}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 26}
+
+  - employee_code: EMP-002
+    scenario: Employee with 3 LOP days
+    full_name: Priya Nair
+    gender: F
+    dob: 1994-11-02
+    doj: 2023-07-10
+    work_state: KA
+    department: Finance
+    designation: Analyst
+    uan: "100000000002"
+    pf_join_date: 2023-07-10
+    salary:
+      - structure: STD-2026
+        monthly_gross: 40000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 20000, HRA: 10000, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 7150}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 22, paid_leave_days: 1, absent_days: 3, lop_days: 3}
+
+  - employee_code: EMP-003
+    scenario: ESIC employee (gross ₹18,000) with PF
+    full_name: Rohan Das
+    gender: M
+    dob: 1999-01-20
+    doj: 2024-02-01
+    work_state: WB
+    department: Operations
+    designation: Associate
+    uan: "100000000003"
+    pf_join_date: 2024-02-01
+    esic_applicable: true
+    esic_ip_number: "3100000003"
+    salary:
+      - structure: LOW-2026
+        monthly_gross: 18000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 10800, HRA: 4320, SPECIAL: 2880}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 26}
+
+  - employee_code: EMP-004
+    scenario: Arrear - increment effective Aug 2026 paid in Sep 2026 (crosses PF rule change)
+    full_name: Meena Iyer
+    gender: F
+    dob: 1988-08-08
+    doj: 2021-06-15
+    work_state: TN
+    department: Sales
+    designation: Manager
+    uan: "100000000004"
+    pf_join_date: 2021-06-15
+    salary:
+      - structure: STD-2026
+        monthly_gross: 50000
+        effective_from: 2025-04-01
+        effective_to: 2026-07-31
+        reason: REVISION
+        components: {BASIC: 25000, HRA: 12500, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 9650}
+      - structure: STD-2026
+        monthly_gross: 55000
+        effective_from: 2026-08-01
+        reason: INCREMENT
+        components: {BASIC: 27500, HRA: 13750, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 10900}
+    attendance:
+      - {period: "2026-08", calendar_days: 31, working_days: 25, week_offs: 5, holidays: 1, present_days: 25}
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 26}
+    arrears:
+      - {paid_in_period: "2026-09", from_period: "2026-08", to_period: "2026-08", head_code: BASIC, old_monthly_amount: 25000, new_monthly_amount: 27500, upload_batch: ARR-2026-09-01}
+      - {paid_in_period: "2026-09", from_period: "2026-08", to_period: "2026-08", head_code: HRA, old_monthly_amount: 12500, new_monthly_amount: 13750, upload_batch: ARR-2026-09-01}
+      - {paid_in_period: "2026-09", from_period: "2026-08", to_period: "2026-08", head_code: SPECIAL, old_monthly_amount: 9650, new_monthly_amount: 10900, upload_batch: ARR-2026-09-01}
+
+  - employee_code: EMP-005
+    scenario: New joiner - DOJ 15 Sep 2026 (mid-month joining)
+    full_name: Vikram Singh
+    gender: M
+    dob: 1998-03-30
+    doj: 2026-09-15
+    work_state: DL
+    department: Engineering
+    designation: Engineer
+    uan: "100000000005"
+    pf_join_date: 2026-09-15
+    salary:
+      - structure: STD-2026
+        monthly_gross: 35000
+        effective_from: 2026-09-15
+        reason: JOINING
+        components: {BASIC: 17500, HRA: 8750, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 5900}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 14, week_offs: 2, holidays: 0, present_days: 14}
+
+  - employee_code: EMP-006
+    scenario: Separated employee - LWD 20 Sep 2026, F&F in Sep 2026
+    full_name: Anjali Mehta
+    gender: F
+    dob: 1992-12-12
+    doj: 2020-01-06
+    lwd: 2026-09-20
+    status: SEPARATED
+    work_state: GJ
+    department: HR
+    designation: HR Executive
+    uan: "100000000006"
+    pf_join_date: 2020-01-06
+    salary:
+      - structure: STD-2026
+        monthly_gross: 45000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 22500, HRA: 11250, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 8400}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 17, week_offs: 3, holidays: 0, present_days: 17}
+    fnf:
+      lwd: 2026-09-20
+      settlement_period: "2026-09"
+      leave_encashment_days: 8
+      notice_period_days: 60
+      notice_days_served: 60
+
+  - employee_code: EMP-007
+    scenario: Employee without PF (excluded employee), no ESIC
+    full_name: Suresh Patil
+    gender: M
+    dob: 1985-06-25
+    doj: 2019-09-01
+    work_state: MH
+    department: Engineering
+    designation: Architect
+    pf_applicable: false
+    eps_eligible: false
+    salary:
+      - structure: STD-2026
+        monthly_gross: 80000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 40000, HRA: 20000, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 17150}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 26}
+
+  - employee_code: EMP-008
+    scenario: ESIC employee near threshold (₹20,500) with 2 LOP days
+    full_name: Kavita Reddy
+    gender: F
+    dob: 2000-10-05
+    doj: 2025-01-15
+    work_state: TG
+    department: Support
+    designation: Associate
+    uan: "100000000008"
+    pf_join_date: 2025-01-15
+    esic_applicable: true
+    esic_ip_number: "3100000008"
+    salary:
+      - structure: LOW-2026
+        monthly_gross: 20500
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 12300, HRA: 4920, SPECIAL: 3280}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 24, absent_days: 2, lop_days: 2}
+
+  - employee_code: EMP-009
+    scenario: Senior citizen (62), old tax regime, PF on actual wage, not EPS eligible
+    full_name: Rahul Verma
+    gender: M
+    dob: 1964-02-10
+    doj: 2018-04-02
+    work_state: HR
+    department: Management
+    designation: Director
+    uan: "100000000009"
+    pf_join_date: 2018-04-02
+    eps_eligible: false
+    pf_wage_restricted: false
+    tax_regime: OLD
+    salary:
+      - structure: STD-2026
+        monthly_gross: 70000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 35000, HRA: 17500, CONVEYANCE: 1600, MEDICAL: 1250, SPECIAL: 14650}
+    attendance:
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 26}
+    tds_declarations:
+      - {financial_year: "2026-27", regime: OLD, section_code: 80C, declared_amount: 150000}
+      - {financial_year: "2026-27", regime: OLD, section_code: 80D, declared_amount: 50000}
+
+  - employee_code: EMP-010
+    scenario: Female in MH below PT limit, not ESIC (gross ₹24,000), LOP 1 + reversal of Aug LOP
+    full_name: Neha Joshi
+    gender: F
+    dob: 1997-07-19
+    doj: 2024-11-11
+    work_state: MH
+    department: Marketing
+    designation: Executive
+    uan: "100000000010"
+    pf_join_date: 2024-11-11
+    salary:
+      - structure: LOW-2026
+        monthly_gross: 24000
+        effective_from: 2025-04-01
+        reason: REVISION
+        components: {BASIC: 14400, HRA: 5760, SPECIAL: 3840}
+    attendance:
+      - {period: "2026-08", calendar_days: 31, working_days: 25, week_offs: 5, holidays: 1, present_days: 24, absent_days: 1, lop_days: 1}
+      - {period: "2026-09", calendar_days: 30, working_days: 26, week_offs: 4, holidays: 0, present_days: 25, absent_days: 1, lop_days: 1, lop_reversal_days: 1}

@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-RJ v1
+rule_name: PT-RJ
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-RJ
+source: No state PT law for salaried employees - verify
+status: UNVERIFIED
+doc_type: rule

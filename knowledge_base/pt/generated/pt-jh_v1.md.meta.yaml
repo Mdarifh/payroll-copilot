@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-JH v1
+rule_name: PT-JH
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-JH
+source: Jharkhand Tax on Professions, Trades, Callings and Employments Act, 2011 -
+  verify
+status: UNVERIFIED
+doc_type: rule

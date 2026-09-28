@@ -1,0 +1,20 @@
+rule_type: PT
+rule_code: PT-MP
+state_code: MP
+state_name: Madhya Pradesh
+versions:
+  - version: 1
+    name: Madhya Pradesh PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Madhya Pradesh Vritti Kar Adhiniyam, 1995 - verify"
+    notes: Slabs on annual (projected) income; deducted monthly, higher amount in March.
+    frequency: MONTHLY
+    wage_basis: ANNUAL
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 225000, amount: 0}
+          - {upto: 300000, amount: 125}
+          - {upto: 400000, amount: 166, month_overrides: {3: 174}}
+          - {upto: null, amount: 208, month_overrides: {3: 212}}

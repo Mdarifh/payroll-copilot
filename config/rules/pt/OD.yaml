@@ -1,0 +1,22 @@
+rule_type: PT
+rule_code: PT-OD
+state_code: OD
+state_name: Odisha
+versions:
+  - version: 1
+    name: Odisha PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Odisha State Tax on Professions, Trades, Callings and Employments Act, 2000 - verify"
+    notes: >-
+      Slabs on annual (projected) income, deducted monthly. Some sources show a higher
+      last-month amount for the top slab (to reach ₹2,500/year); confirm and add a
+      month_override if applicable.
+    frequency: MONTHLY
+    wage_basis: ANNUAL
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 160000, amount: 0}
+          - {upto: 300000, amount: 125}
+          - {upto: null, amount: 200}

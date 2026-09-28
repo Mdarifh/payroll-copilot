@@ -1,0 +1,15 @@
+rule_type: LWF
+rule_code: LWF-HR
+state_code: HR
+state_name: Haryana
+versions:
+  - version: 1
+    name: Haryana LWF (monthly, % of wages)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Punjab Labour Welfare Fund Act, 1965 as applicable to Haryana - verify"
+    frequency: MONTHLY
+    deduction_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    employee_rate: 0.2
+    employee_max_amount: 34
+    employer_multiplier: 2

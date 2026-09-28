@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-GJ v1
+rule_name: PT-GJ
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-GJ
+source: Gujarat State Tax on Professions, Trades, Callings and Employments Act, 1976
+  - verify
+status: UNVERIFIED
+doc_type: rule

@@ -1,0 +1,11 @@
+rule_type: PT
+rule_code: PT-UK
+state_code: UK
+state_name: Uttarakhand
+versions:
+  - version: 1
+    name: Uttarakhand - PT not levied
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "No state PT law for salaried employees - verify"
+    is_levied: false

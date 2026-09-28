@@ -1,0 +1,11 @@
+rule_type: PT
+rule_code: PT-DL
+state_code: DL
+state_name: Delhi
+versions:
+  - version: 1
+    name: Delhi - PT not levied
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "No state PT law for salaried employees - verify"
+    is_levied: false

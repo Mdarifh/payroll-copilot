@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-KA v1
+rule_name: LWF-KA
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-KA
+source: Karnataka Labour Welfare Fund Act, 1965 - verify
+status: UNVERIFIED
+doc_type: rule

@@ -1,0 +1,11 @@
+rule_type: PT
+rule_code: PT-CH
+state_code: CH
+state_name: Chandigarh
+versions:
+  - version: 1
+    name: Chandigarh - PT not levied
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "No PT law for salaried employees - verify"
+    is_levied: false

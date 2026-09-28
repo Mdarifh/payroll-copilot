@@ -1,0 +1,22 @@
+rule_type: PT
+rule_code: PT-MH
+state_code: MH
+state_name: Maharashtra
+versions:
+  - version: 1
+    name: Maharashtra PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Maharashtra State Tax on Professions, Trades, Callings and Employments Act, 1975 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: F
+        slabs:
+          - {upto: 25000, amount: 0}
+          - {upto: null, amount: 200, month_overrides: {2: 300}}
+      - gender: null
+        slabs:
+          - {upto: 7500, amount: 0}
+          - {upto: 10000, amount: 175}
+          - {upto: null, amount: 200, month_overrides: {2: 300}}

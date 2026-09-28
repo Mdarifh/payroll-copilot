@@ -1,0 +1,21 @@
+rule_type: PT
+rule_code: PT-MZ
+state_code: MZ
+state_name: Mizoram
+versions:
+  - version: 1
+    name: Mizoram PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Mizoram Professions, Trades, Callings and Employments Taxation Act, 1995 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 5000, amount: 0}
+          - {upto: 8000, amount: 75}
+          - {upto: 10000, amount: 120}
+          - {upto: 12000, amount: 150}
+          - {upto: 15000, amount: 180}
+          - {upto: null, amount: 208}

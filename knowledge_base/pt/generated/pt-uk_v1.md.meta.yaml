@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-UK v1
+rule_name: PT-UK
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-UK
+source: No state PT law for salaried employees - verify
+status: UNVERIFIED
+doc_type: rule

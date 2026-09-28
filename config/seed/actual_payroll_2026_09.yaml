@@ -1,0 +1,49 @@
+# "Actual" payroll for September 2026 = what the payroll system under test produced.
+# It is generated from the expected calculation, then the deliberate errors below are
+# applied so the QA engine has realistic discrepancies to find. Fictional data.
+#
+# Override semantics per employee:
+#   paid_days / lop_days         replace the header values
+#   earnings: {HEAD: amount}     replaces ALL earning lines (arrear lines dropped)
+#   deductions / employer:       replace only the listed heads (others kept)
+#   net_pay                      overrides the header net only (lines unchanged)
+
+period: "2026-09"
+employees:
+  ARIF-112:
+    note: PF calculated with the old ₹15,000 wage ceiling instead of the Sep-2026 ₹25,000 rule
+    deductions: {EE_PF: 1800}
+    employer: {ER_EPF: 550, EPS: 1250, EDLI: 75, EPF_ADMIN: 75}
+
+  EMP-002:
+    note: 3 LOP days not deducted (paid full month)
+    paid_days: 30
+    lop_days: 0
+    earnings: {BASIC: 20000, HRA: 10000, SPECIAL: 7150, CONVEYANCE: 1600, MEDICAL: 1250}
+    deductions: {EE_PF: 2400}
+    employer: {ER_EPF: 734, EPS: 1666, EDLI: 100, EPF_ADMIN: 100}
+
+  EMP-004:
+    note: August increment arrear not paid
+    earnings: {BASIC: 27500, HRA: 13750, SPECIAL: 10900, CONVEYANCE: 1600, MEDICAL: 1250}
+
+  EMP-005:
+    note: New joiner (DOJ 15-Sep) paid for the full month
+    paid_days: 30
+    earnings: {BASIC: 17500, HRA: 8750, SPECIAL: 5900, CONVEYANCE: 1600, MEDICAL: 1250}
+    deductions: {EE_PF: 2100}
+    employer: {ER_EPF: 642, EPS: 1458, EDLI: 88, EPF_ADMIN: 88}
+
+  EMP-007:
+    note: Payslip header net pay does not match its own lines (data quality)
+    net_pay: 79700
+
+  EMP-008:
+    note: Employee ESIC rounded HALF_UP instead of CEIL; PT ₹200 slab instead of ₹150
+    deductions: {EE_ESIC: 143, PT: 200}
+
+  EMP-010:
+    note: LOP reversal (1 day of August) not paid
+    earnings: {BASIC: 13920, HRA: 5568, SPECIAL: 3712}
+    deductions: {EE_PF: 1670}
+    employer: {ER_EPF: 510, EPS: 1160, EDLI: 70, EPF_ADMIN: 70}

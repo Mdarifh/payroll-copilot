@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-BR v1
+rule_name: PT-BR
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-BR
+source: Bihar Tax on Professions, Trades, Callings and Employments Act, 2011 - verify
+status: UNVERIFIED
+doc_type: rule

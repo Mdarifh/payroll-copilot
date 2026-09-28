@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-WB v1
+rule_name: LWF-WB
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-WB
+source: West Bengal Labour Welfare Fund Act, 1974 - verify
+status: UNVERIFIED
+doc_type: rule

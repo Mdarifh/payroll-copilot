@@ -1,0 +1,23 @@
+rule_type: PT
+rule_code: PT-TN
+state_code: TN
+state_name: Tamil Nadu
+versions:
+  - version: 1
+    name: Tamil Nadu PT (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Tamil Nadu Urban Local Bodies Act (half-yearly PT, revised 2024) - verify; rates can differ by local body"
+    notes: Slabs are on half-yearly income; deducted in September and March.
+    frequency: HALF_YEARLY
+    wage_basis: HALF_YEARLY
+    deduction_months: [9, 3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 21000, amount: 0}
+          - {upto: 30000, amount: 180}
+          - {upto: 45000, amount: 425}
+          - {upto: 60000, amount: 930}
+          - {upto: 75000, amount: 1025}
+          - {upto: null, amount: 1250}

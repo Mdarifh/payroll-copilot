@@ -1,0 +1,14 @@
+rule_type: LWF
+rule_code: LWF-TN
+state_code: TN
+state_name: Tamil Nadu
+versions:
+  - version: 1
+    name: Tamil Nadu LWF (yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Tamil Nadu Labour Welfare Fund Act, 1972 - verify"
+    frequency: YEARLY
+    deduction_months: [12]
+    employee_amount: 50
+    employer_amount: 100

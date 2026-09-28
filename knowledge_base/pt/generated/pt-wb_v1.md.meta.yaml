@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-WB v1
+rule_name: PT-WB
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-WB
+source: West Bengal State Tax on Professions, Trades, Callings and Employments Act,
+  1979 - verify
+status: UNVERIFIED
+doc_type: rule

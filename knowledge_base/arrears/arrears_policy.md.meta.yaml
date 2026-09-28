@@ -1,0 +1,10 @@
+module: arrears
+document_name: Salary arrears policy
+rule_name: ARREARS
+version: "1"
+effective_from: 2025-04-01
+effective_to: null
+jurisdiction: IN
+source: Demo company payroll policy (fictional) - AI Payroll Copilot configuration
+status: UNVERIFIED
+doc_type: policy

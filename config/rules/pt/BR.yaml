@@ -1,0 +1,21 @@
+rule_type: PT
+rule_code: PT-BR
+state_code: BR
+state_name: Bihar
+versions:
+  - version: 1
+    name: Bihar PT (yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Bihar Tax on Professions, Trades, Callings and Employments Act, 2011 - verify"
+    notes: Slabs on annual income; yearly amount. Deduction month is a company choice (March used here).
+    frequency: YEARLY
+    wage_basis: ANNUAL
+    deduction_months: [3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 300000, amount: 0}
+          - {upto: 500000, amount: 1000}
+          - {upto: 1000000, amount: 2000}
+          - {upto: null, amount: 2500}

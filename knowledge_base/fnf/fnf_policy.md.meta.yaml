@@ -1,0 +1,10 @@
+module: fnf
+document_name: Full and final settlement policy
+rule_name: FNF
+version: "1"
+effective_from: 2025-04-01
+effective_to: null
+jurisdiction: IN
+source: Demo company payroll policy (fictional) - AI Payroll Copilot configuration
+status: UNVERIFIED
+doc_type: policy

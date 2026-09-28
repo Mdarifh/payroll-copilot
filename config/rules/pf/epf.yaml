@@ -1,0 +1,51 @@
+# EPF / EPS / EDLI / EPF Admin - versioned rule family.
+# All rates are percentages. Values entered from assistant knowledge and user
+# instruction; status UNVERIFIED until checked against the EPFO notification.
+rule_type: PF
+rule_code: EPF
+versions:
+  - version: 1
+    name: EPF ₹15,000 wage ceiling (admin 0.50%)
+    effective_from: 2018-06-01
+    effective_to: 2026-08-31
+    status: UNVERIFIED
+    source_ref: "EPF Scheme 1952 / EPS 1995 (ceiling ₹15,000 w.e.f. 01-09-2014); admin charge 0.50% w.e.f. 01-06-2018"
+    applicability:
+      - {field: pf_applicable, op: eq, value: true}
+    employee_rate: 12
+    employer_rate: 12          # EPS is carved out of this; Employer EPF = employer share - EPS
+    eps_rate: 8.33
+    edli_rate: 0.5
+    admin_rate: 0.5
+    admin_min_amount: 500      # per establishment per month, not per employee
+    pf_wage_ceiling: 15000
+    eps_wage_ceiling: 15000
+    edli_wage_ceiling: 15000
+    eps_max_age: 58
+    ceiling_proration: NONE
+    rounding_mode: HALF_UP
+
+  - version: 2
+    name: EPF ₹25,000 wage ceiling (September 2026)
+    effective_from: 2026-09-01
+    effective_to: null
+    status: UNVERIFIED
+    source_ref: "Sept-2026 PF wage ceiling revision to ₹25,000 (as instructed by user) - attach notification"
+    notes: >-
+      EPS and EDLI ceilings assumed to move to ₹25,000 along with the PF wage ceiling.
+      Confirm from the official notification; if EPS stays at ₹15,000 change
+      eps_wage_ceiling here (while UNVERIFIED) or add version 3.
+    applicability:
+      - {field: pf_applicable, op: eq, value: true}
+    employee_rate: 12
+    employer_rate: 12
+    eps_rate: 8.33
+    edli_rate: 0.5
+    admin_rate: 0.5
+    admin_min_amount: 500
+    pf_wage_ceiling: 25000
+    eps_wage_ceiling: 25000
+    edli_wage_ceiling: 25000
+    eps_max_age: 58
+    ceiling_proration: NONE
+    rounding_mode: HALF_UP

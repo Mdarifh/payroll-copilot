@@ -1,0 +1,21 @@
+rule_type: PT
+rule_code: PT-NL
+state_code: NL
+state_name: Nagaland
+versions:
+  - version: 1
+    name: Nagaland PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Nagaland Professions, Trades, Callings and Employments Taxation Act, 1968 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 4000, amount: 0}
+          - {upto: 5000, amount: 35}
+          - {upto: 7000, amount: 75}
+          - {upto: 9000, amount: 110}
+          - {upto: 12000, amount: 180}
+          - {upto: null, amount: 208}

@@ -1,0 +1,11 @@
+module: pf
+document_name: EPF v2
+rule_name: EPF
+version: '2'
+effective_from: '2026-09-01'
+effective_to: null
+jurisdiction: IN
+source: Sept-2026 PF wage ceiling revision to ₹25,000 (as instructed by user) - attach
+  notification
+status: UNVERIFIED
+doc_type: rule

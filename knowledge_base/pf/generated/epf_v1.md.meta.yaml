@@ -1,0 +1,11 @@
+module: pf
+document_name: EPF v1
+rule_name: EPF
+version: '1'
+effective_from: '2018-06-01'
+effective_to: '2026-08-31'
+jurisdiction: IN
+source: EPF Scheme 1952 / EPS 1995 (ceiling ₹15,000 w.e.f. 01-09-2014); admin charge
+  0.50% w.e.f. 01-06-2018
+status: UNVERIFIED
+doc_type: rule

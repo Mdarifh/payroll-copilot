@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-HR v1
+rule_name: LWF-HR
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-HR
+source: Punjab Labour Welfare Fund Act, 1965 as applicable to Haryana - verify
+status: UNVERIFIED
+doc_type: rule

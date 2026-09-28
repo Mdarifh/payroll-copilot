@@ -1,0 +1,15 @@
+rule_type: LWF
+rule_code: LWF-MH
+state_code: MH
+state_name: Maharashtra
+versions:
+  - version: 1
+    name: Maharashtra LWF (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Maharashtra Labour Welfare Fund Act, 1953 - verify"
+    notes: Lower amounts may apply to very low wages; not modelled yet.
+    frequency: HALF_YEARLY
+    deduction_months: [6, 12]
+    employee_amount: 25
+    employer_amount: 75

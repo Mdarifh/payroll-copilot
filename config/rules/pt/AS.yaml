@@ -1,0 +1,18 @@
+rule_type: PT
+rule_code: PT-AS
+state_code: AS
+state_name: Assam
+versions:
+  - version: 1
+    name: Assam PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Assam Professions, Trades, Callings and Employments Taxation Act, 1985 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 15000, amount: 0}
+          - {upto: 25000, amount: 180}
+          - {upto: null, amount: 208}

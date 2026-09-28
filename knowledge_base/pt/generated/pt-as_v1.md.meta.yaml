@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-AS v1
+rule_name: PT-AS
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-AS
+source: Assam Professions, Trades, Callings and Employments Taxation Act, 1985 - verify
+status: UNVERIFIED
+doc_type: rule

@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-DL v1
+rule_name: LWF-DL
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-DL
+source: Bombay Labour Welfare Fund Act, 1953 as extended to Delhi - verify
+status: UNVERIFIED
+doc_type: rule

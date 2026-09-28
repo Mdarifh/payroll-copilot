@@ -1,0 +1,14 @@
+rule_type: LWF
+rule_code: LWF-GJ
+state_code: GJ
+state_name: Gujarat
+versions:
+  - version: 1
+    name: Gujarat LWF (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Gujarat Labour Welfare Fund Act, 1953 - verify"
+    frequency: HALF_YEARLY
+    deduction_months: [6, 12]
+    employee_amount: 6
+    employer_amount: 12

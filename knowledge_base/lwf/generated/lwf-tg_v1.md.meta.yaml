@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-TG v1
+rule_name: LWF-TG
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-TG
+source: Telangana Labour Welfare Fund Act, 1987 - verify
+status: UNVERIFIED
+doc_type: rule

@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-HP v1
+rule_name: PT-HP
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-HP
+source: No state PT law for salaried employees - verify
+status: UNVERIFIED
+doc_type: rule

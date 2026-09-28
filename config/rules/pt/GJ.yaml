@@ -1,0 +1,17 @@
+rule_type: PT
+rule_code: PT-GJ
+state_code: GJ
+state_name: Gujarat
+versions:
+  - version: 1
+    name: Gujarat PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Gujarat State Tax on Professions, Trades, Callings and Employments Act, 1976 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 11999.99, amount: 0}
+          - {upto: null, amount: 200}

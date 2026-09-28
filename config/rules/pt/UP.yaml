@@ -1,0 +1,11 @@
+rule_type: PT
+rule_code: PT-UP
+state_code: UP
+state_name: Uttar Pradesh
+versions:
+  - version: 1
+    name: Uttar Pradesh - PT not levied
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "No state PT law for salaried employees - verify"
+    is_levied: false

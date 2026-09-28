@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-MZ v1
+rule_name: PT-MZ
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-MZ
+source: Mizoram Professions, Trades, Callings and Employments Taxation Act, 1995 -
+  verify
+status: UNVERIFIED
+doc_type: rule

@@ -1,0 +1,10 @@
+module: tds
+document_name: TDS-OLD-SUPER-SENIOR v1
+rule_name: TDS-OLD-SUPER-SENIOR
+version: '1'
+effective_from: '2026-04-01'
+effective_to: '2027-03-31'
+jurisdiction: IN
+source: Income-tax Act 2025 / Finance Act slabs for FY 2026-27 - verify
+status: UNVERIFIED
+doc_type: rule

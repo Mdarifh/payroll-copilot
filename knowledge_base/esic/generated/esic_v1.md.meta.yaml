@@ -1,0 +1,11 @@
+module: esic
+document_name: ESIC v1
+rule_name: ESIC
+version: '1'
+effective_from: '2019-07-01'
+effective_to: null
+jurisdiction: IN
+source: ESI (Central) Rules - rates 0.75%/3.25% w.e.f. 01-07-2019; threshold ₹21,000
+  (₹25,000 for PwD) w.e.f. 01-01-2017
+status: UNVERIFIED
+doc_type: rule

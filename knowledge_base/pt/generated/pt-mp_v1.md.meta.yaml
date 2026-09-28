@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-MP v1
+rule_name: PT-MP
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-MP
+source: Madhya Pradesh Vritti Kar Adhiniyam, 1995 - verify
+status: UNVERIFIED
+doc_type: rule

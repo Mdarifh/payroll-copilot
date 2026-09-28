@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-TR v1
+rule_name: PT-TR
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-TR
+source: Tripura Professions, Trades, Callings and Employments Taxation Act, 1997 -
+  verify
+status: UNVERIFIED
+doc_type: rule

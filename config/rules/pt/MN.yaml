@@ -1,0 +1,22 @@
+rule_type: PT
+rule_code: PT-MN
+state_code: MN
+state_name: Manipur
+versions:
+  - version: 1
+    name: Manipur PT (yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Manipur Professions, Trades, Callings and Employments Taxation Act, 1981 - verify"
+    notes: Slabs on annual income; yearly amount. Deduction month is a company choice (March used here).
+    frequency: YEARLY
+    wage_basis: ANNUAL
+    deduction_months: [3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 50000, amount: 0}
+          - {upto: 75000, amount: 1200}
+          - {upto: 100000, amount: 2000}
+          - {upto: 125000, amount: 2400}
+          - {upto: null, amount: 2500}

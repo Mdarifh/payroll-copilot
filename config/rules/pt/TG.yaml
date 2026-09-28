@@ -1,0 +1,18 @@
+rule_type: PT
+rule_code: PT-TG
+state_code: TG
+state_name: Telangana
+versions:
+  - version: 1
+    name: Telangana PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Telangana Tax on Professions, Trades, Callings and Employments Act, 1987 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 15000, amount: 0}
+          - {upto: 20000, amount: 150}
+          - {upto: null, amount: 200}

@@ -1,0 +1,26 @@
+rule_type: PT
+rule_code: PT-KL
+state_code: KL
+state_name: Kerala
+versions:
+  - version: 1
+    name: Kerala PT (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Kerala Municipality / Panchayat Raj (Profession Tax) Rules - verify; rates can differ by local body"
+    notes: Slabs are on half-yearly income; deducted in September and March.
+    frequency: HALF_YEARLY
+    wage_basis: HALF_YEARLY
+    deduction_months: [9, 3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 11999.99, amount: 0}
+          - {upto: 17999.99, amount: 120}
+          - {upto: 29999.99, amount: 180}
+          - {upto: 44999.99, amount: 300}
+          - {upto: 59999.99, amount: 450}
+          - {upto: 74999.99, amount: 600}
+          - {upto: 99999.99, amount: 750}
+          - {upto: 124999.99, amount: 1000}
+          - {upto: null, amount: 1250}

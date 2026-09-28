@@ -1,0 +1,18 @@
+rule_type: PT
+rule_code: PT-PB
+state_code: PB
+state_name: Punjab
+versions:
+  - version: 1
+    name: Punjab State Development Tax
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Punjab State Development Tax Act, 2018 - verify"
+    notes: ₹200 per month when annual income exceeds ₹2.5 lakh.
+    frequency: MONTHLY
+    wage_basis: ANNUAL
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 250000, amount: 0}
+          - {upto: null, amount: 200}

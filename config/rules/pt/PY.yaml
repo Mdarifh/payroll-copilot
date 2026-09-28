@@ -1,0 +1,23 @@
+rule_type: PT
+rule_code: PT-PY
+state_code: PY
+state_name: Puducherry
+versions:
+  - version: 1
+    name: Puducherry PT (half-yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Puducherry Municipalities Act, 1973 (profession tax) - verify"
+    notes: Slabs are on half-yearly income; deducted in September and March.
+    frequency: HALF_YEARLY
+    wage_basis: HALF_YEARLY
+    deduction_months: [9, 3]
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 99999.99, amount: 0}
+          - {upto: 200000, amount: 250}
+          - {upto: 300000, amount: 500}
+          - {upto: 400000, amount: 750}
+          - {upto: 500000, amount: 1000}
+          - {upto: null, amount: 1250}

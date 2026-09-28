@@ -1,0 +1,10 @@
+module: lwf
+document_name: LWF-TN v1
+rule_name: LWF-TN
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-TN
+source: Tamil Nadu Labour Welfare Fund Act, 1972 - verify
+status: UNVERIFIED
+doc_type: rule

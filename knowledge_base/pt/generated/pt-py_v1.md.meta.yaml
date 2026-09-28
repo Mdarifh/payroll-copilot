@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-PY v1
+rule_name: PT-PY
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-PY
+source: Puducherry Municipalities Act, 1973 (profession tax) - verify
+status: UNVERIFIED
+doc_type: rule

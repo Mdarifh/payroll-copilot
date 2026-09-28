@@ -1,0 +1,11 @@
+module: pt
+document_name: PT-KL v1
+rule_name: PT-KL
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-KL
+source: Kerala Municipality / Panchayat Raj (Profession Tax) Rules - verify; rates
+  can differ by local body
+status: UNVERIFIED
+doc_type: rule

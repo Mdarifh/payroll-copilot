@@ -1,0 +1,14 @@
+rule_type: LWF
+rule_code: LWF-TG
+state_code: TG
+state_name: Telangana
+versions:
+  - version: 1
+    name: Telangana LWF (yearly)
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Telangana Labour Welfare Fund Act, 1987 - verify"
+    frequency: YEARLY
+    deduction_months: [12]
+    employee_amount: 2
+    employer_amount: 5

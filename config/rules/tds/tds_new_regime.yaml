@@ -1,0 +1,36 @@
+# Income tax on salary - NEW regime (default regime). Same slabs for all ages.
+# FY 2026-27 falls under the Income-tax Act 2025 (in force from 01-04-2026).
+# Slabs mirror the Finance Act 2025 values; UNVERIFIED until checked.
+rule_type: TDS
+rule_code: TDS-NEW
+versions:
+  - version: 1
+    name: New regime FY 2026-27
+    financial_year: "2026-27"
+    regime: NEW
+    age_category: null        # applies to every age
+    effective_from: 2026-04-01
+    effective_to: 2027-03-31
+    status: UNVERIFIED
+    source_ref: "Income-tax Act 2025 / Finance Act slabs for FY 2026-27 - verify"
+    standard_deduction: 75000
+    rebate_income_limit: 1200000
+    rebate_max: 60000
+    rebate_marginal_relief: true
+    cess_rate: 4
+    surcharge:
+      - {above: 5000000, rate: 10}
+      - {above: 10000000, rate: 15}
+      - {above: 20000000, rate: 25}   # new regime surcharge capped at 25%
+    slabs:
+      - {upto: 400000, rate: 0}
+      - {upto: 800000, rate: 5}
+      - {upto: 1200000, rate: 10}
+      - {upto: 1600000, rate: 15}
+      - {upto: 2000000, rate: 20}
+      - {upto: 2400000, rate: 25}
+      - {upto: null, rate: 30}
+    # New regime: employee declarations (80C/80D...) and PT are not deductible.
+    deduction_limits: {}
+    allow_professional_tax_deduction: false
+    rounding_mode: HALF_UP

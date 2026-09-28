@@ -1,0 +1,10 @@
+module: pt
+document_name: PT-DL v1
+rule_name: PT-DL
+version: '1'
+effective_from: '2025-04-01'
+effective_to: null
+jurisdiction: IN-DL
+source: No state PT law for salaried employees - verify
+status: UNVERIFIED
+doc_type: rule

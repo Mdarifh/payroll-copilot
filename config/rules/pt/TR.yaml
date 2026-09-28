@@ -1,0 +1,18 @@
+rule_type: PT
+rule_code: PT-TR
+state_code: TR
+state_name: Tripura
+versions:
+  - version: 1
+    name: Tripura PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Tripura Professions, Trades, Callings and Employments Taxation Act, 1997 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 7500, amount: 0}
+          - {upto: 15000, amount: 150}
+          - {upto: null, amount: 208}

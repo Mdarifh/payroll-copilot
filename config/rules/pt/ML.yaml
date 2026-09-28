@@ -1,0 +1,28 @@
+rule_type: PT
+rule_code: PT-ML
+state_code: ML
+state_name: Meghalaya
+versions:
+  - version: 1
+    name: Meghalaya PT
+    effective_from: 2025-04-01
+    status: UNVERIFIED
+    source_ref: "Meghalaya Professions, Trades, Callings and Employments Taxation Act, 1947 - verify"
+    frequency: MONTHLY
+    wage_basis: MONTHLY
+    rounding_mode: NONE
+    slab_sets:
+      - gender: null
+        slabs:
+          - {upto: 4166, amount: 0}
+          - {upto: 6250, amount: 16.50}
+          - {upto: 8333, amount: 25}
+          - {upto: 12500, amount: 41.50}
+          - {upto: 16666, amount: 62.50}
+          - {upto: 20833, amount: 83.33}
+          - {upto: 25000, amount: 104.16}
+          - {upto: 29166, amount: 125}
+          - {upto: 33333, amount: 150}
+          - {upto: 37500, amount: 175}
+          - {upto: 41666, amount: 200}
+          - {upto: null, amount: 208}
