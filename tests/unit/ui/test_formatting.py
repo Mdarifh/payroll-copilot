@@ -79,8 +79,13 @@ def test_comparison_and_findings():
 
 
 def test_month_options():
-    months = fmt.month_options()
-    assert (months[0], months[5], months[-1], len(months)) == ("2026-04", "2026-09", "2027-03", 12)
+    months = fmt.month_options("2026-09")
+    assert (months[0], months[12], months[-1], len(months)) == ("2025-09", "2026-09", "2026-12", 16)
+
+
+def test_default_period():
+    assert fmt.default_period("2026-09") == "2026-09"
+    assert fmt.default_period(None, today=date(2027, 1, 15)) == "2026-12"
 
 
 class TestAddContext:

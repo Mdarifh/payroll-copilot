@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, R
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from payroll_copilot import __version__
 from payroll_copilot.api.schemas import (
@@ -40,7 +40,7 @@ from payroll_copilot.core.exceptions import (
     PayrollCopilotError,
     PeriodError,
 )
-from payroll_copilot.db.models import Employee
+from payroll_copilot.db.models import Attendance, Employee
 from payroll_copilot.rag.service import KnowledgeBase
 from payroll_copilot.services.approval_service import (
     ApprovalError,
@@ -131,10 +131,21 @@ def create_app(
 
     # ------------------------------------------------------------------ audit middleware
 
+    def verified(user: str | None, token: str | None) -> bool:
+        """A well-formed X-User; with USER_TOKENS set it also needs that user's own token."""
+        if not user or not _USER.match(user):
+            return False
+        if not settings.user_tokens:
+            return True
+        expected = settings.user_tokens.get(user)
+        return bool(expected and token
+                    and secrets.compare_digest(token, expected.get_secret_value()))  # fmt: skip
+
     @app.middleware("http")
     async def audit_requests(request: Request, call_next):
         user = request.headers.get("X-User", "")
-        actor = f"api:{user}" if _USER.match(user) else "api:anonymous"
+        token = request.headers.get("X-User-Token")
+        actor = f"api:{user}" if verified(user, token) else "api:anonymous"
         request_id = request.headers.get("X-Request-ID", "")
         request_id = request_id if _REQUEST_ID.match(request_id) else None
         start = time.perf_counter()
@@ -154,14 +165,17 @@ def create_app(
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, Any]:
+        latest_period = None
         try:
             with ctx.sessions() as s:
                 s.execute(text("SELECT 1"))
+                latest_period = s.scalar(select(func.max(Attendance.period)))
             database = "ok"
         except Exception as exc:  # noqa: BLE001 - health must report, not raise
             database = f"error: {exc.__class__.__name__}"
         return {"status": "ok" if database == "ok" else "degraded", "version": __version__,
-                "database": database, "llm_provider": settings.llm_provider.value}  # fmt: skip
+                "database": database, "llm_provider": settings.llm_provider.value,
+                "latest_period": latest_period}  # fmt: skip
 
     api = APIRouter(dependencies=[Depends(require_api_key)])
 
@@ -310,16 +324,20 @@ def create_app(
     def _approvals(session) -> ApprovalService:
         return ApprovalService(session, settings.approvers)
 
-    def _user(x_user: str | None) -> str:
+    def _user(x_user: str | None, x_user_token: str | None) -> str:
         if not x_user or not _USER.match(x_user):
             raise HTTPException(status_code=401, detail="X-User header required for approvals")
+        if not verified(x_user, x_user_token):
+            raise HTTPException(status_code=401, detail="Missing or invalid X-User-Token")
         return x_user
 
     @api.post("/approvals", tags=["approvals"], status_code=201,
               summary="Request a write action (needs another user's approval)")  # fmt: skip
-    def request_approval(body: ApprovalRequest,
-                         x_user: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user)
+    def request_approval(
+        body: ApprovalRequest, x_user: str | None = Header(default=None),
+        x_user_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:  # fmt: skip
+        user = _user(x_user, x_user_token)
         with ctx.write_sessions() as s:
             view = _approvals(s).request(body.action_type, body.payload,
                                               requested_by=f"api:{user}", reason=body.reason)
@@ -338,15 +356,17 @@ def create_app(
 
     @api.post("/approvals/{approval_id}/approve", tags=["approvals"])
     def approve(approval_id: int, body: ApprovalDecision,
-                x_user: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user)
+                x_user: str | None = Header(default=None),
+                x_user_token: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
+        user = _user(x_user, x_user_token)
         with ctx.write_sessions() as s:
             return _approvals(s).approve(approval_id, user, body.comment).model_dump()
 
     @api.post("/approvals/{approval_id}/reject", tags=["approvals"])
     def reject(approval_id: int, body: ApprovalDecision,
-               x_user: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user)
+               x_user: str | None = Header(default=None),
+               x_user_token: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
+        user = _user(x_user, x_user_token)
         with ctx.write_sessions() as s:
             return _approvals(s).reject(approval_id, user, body.comment or "").model_dump()
 

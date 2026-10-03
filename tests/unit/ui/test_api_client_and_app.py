@@ -14,6 +14,7 @@ class TestApiClient:
     def test_calls(self, api_client):
         assert api_client.health()["database"] == "ok"
         assert len(api_client.employees()) == 10
+        assert api_client.health()["latest_period"] == "2026-09"  # newest attendance month
         pf = api_client.calculate("pf", "ARIF-112", "2026-09")
         assert pf["data"]["pf"]["amounts"]["EE_PF"] == "3000"
         view = api_client.employee_view("attendance", "EMP-002", "2026-09")
@@ -86,6 +87,18 @@ class TestStreamlitApp:
         assert not app.exception
         metrics = {m.label: m.value for m in app.metric}
         assert metrics["Findings"] == "8" and metrics["Clean"] == "3"
+        app.toggle(key="eva_only_issues").set_value(True).run()  # any rerun keeps the report
+        assert {m.label: m.value for m in app.metric}["Findings"] == "8"
+
+    def test_qa_save_request_from_ui(self, app, seeded_session):
+        seed_actual_payroll(seeded_session)
+        app.button(key="qa_run").click().run()
+        app.button(key="qa_save").click().run()
+        assert not app.exception
+        assert any("Approval request #" in s.value for s in app.success)
+        pending = app.session_state["client"].approvals("PENDING")
+        assert pending[0]["action_type"] == "SAVE_QA_RUN"
+        assert pending[0]["requested_by"] == "api:hr.user"
 
     def test_policy_tab(self, app):
         app.button(key="kb_run").click().run()

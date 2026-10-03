@@ -39,6 +39,12 @@ class Entities:
         }  # fmt: skip
 
 
+def _is_period_token(match: re.Match[str]) -> bool:
+    """'Sep-2026' looks like an employee code but is a payroll month."""
+    prefix, number = match.group(1).lower(), match.group(2)
+    return prefix in _MONTHS and re.fullmatch(r"20\d{2}", number) is not None
+
+
 def extract_period(text: str) -> str | None:
     for pattern, order in ((_ISO, "ym"), (_MONTH_FIRST, "my"), (_NAMED, "named")):
         match = pattern.search(text)
@@ -65,7 +71,7 @@ def extract_entities(
     directory = list(directory)
     codes = {code for code, _ in directory}
 
-    match = _CODE.search(text)
+    match = next((m for m in _CODE.finditer(text) if not _is_period_token(m)), None)
     if match:
         code = f"{match.group(1)}-{match.group(2)}".upper()
         if not codes or code in codes:

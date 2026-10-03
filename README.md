@@ -258,7 +258,7 @@ the run is stored only after an approver approves it.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | status, DB check (no auth) |
+| GET | `/health` | status, DB check, newest data month `latest_period` (no auth) |
 | GET | `/employees`, `/employees/{code}` | employee list / master (PAN, UAN masked) |
 | GET | `/employees/{code}/attendance?period=` | attendance + paid-days trace |
 | GET | `/employees/{code}/salary-structure?period=` | structure + applicable compliance |
@@ -287,7 +287,10 @@ the run is stored only after an approver approves it.
 `payroll-copilot ui --with-api` starts the API and the UI on localhost. The UI only
 calls the API (never the database directly).
 
-- **Sidebar:** API/DB/LLM status, employee and payroll-month selectors, new conversation.
+- **Sidebar:** API/DB/LLM status, employee and payroll-month selectors (default = newest
+  month with attendance data), acting user + token, new conversation.
+- Results stay on screen across reruns (download, toggles) until the employee / month /
+  calculation they belong to changes.
 - **💬 Chat:** copilot with thread memory; the selected employee/month is added to a
   question only when it names neither (never to policy questions). Each answer shows
   route/tools/sources and the calculation traces as tables.
@@ -295,7 +298,7 @@ calls the API (never the database directly).
   salary, attendance, structure, PF, PF old vs new, ESIC, PT, TDS, arrears, F&F.
 - **⚖️ Expected vs Actual:** component table with ✅ / ❌ status, issue type and root cause.
 - **📋 QA Report:** metrics, findings by category chart, findings table, CSV download,
-  saved runs.
+  "request save" (creates a `SAVE_QA_RUN` approval), saved runs.
 - **📚 Policy:** period / module / state-filtered knowledge-base search with citations.
 - **✅ Approvals:** pending requests with preview, approve / reject with comment (as the
   sidebar "Acting as" user), decided requests.
@@ -335,6 +338,10 @@ Streamlit usage statistics are disabled (`.streamlit/config.toml`).
 | `VERIFY_RULE` | rule status (must be UNVERIFIED) | marks the rule VERIFIED + stores the evidence; a later `rules sync` keeps it |
 
 - `APPROVERS=["priya.hr","rahul.fin"]` in `.env`. No approvers → nothing can be approved.
+- `USER_TOKENS={"priya.hr":"...","hr.user":"..."}`: when set, the API accepts `X-User` only
+  with that user's `X-User-Token` (otherwise 401; audit actor `api:anonymous`), so nobody can
+  approve by sending an approver's name. Required in prod when `APPROVERS` is set. The UI
+  sends it from the sidebar "User token" field.
 - The requester can never approve or reject their own request (the channel does not
   matter: `cli:alice` = `api:alice`). Reject needs a comment.
 - Approval runs the action in a savepoint: any error → rolled back, status `FAILED` with

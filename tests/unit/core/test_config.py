@@ -108,6 +108,17 @@ def test_prod_ok_when_complete(make_settings):
     assert settings.app_env == "prod"
 
 
+def test_prod_approvers_need_user_tokens(make_settings):
+    complete = {"app_env": "prod", "llm_provider": "openai", "llm_model": "m",
+                "openai_api_key": "sk-real-9999", "api_key": "api-key-7777",
+                "approvers": ["alice"]}  # fmt: skip
+    with pytest.raises(ConfigurationError, match="USER_TOKENS"):
+        make_settings(**complete)
+    settings = make_settings(**complete, user_tokens={"alice": "tok-alice-1"})
+    assert "tok-alice-1" in settings.secret_values()
+    assert settings.summary()["user_tokens"] == "tokens for ['alice']"
+
+
 def test_secrets_never_leak(make_settings):
     secret = "sk-supersecret-abcd1234"
     settings = make_settings(

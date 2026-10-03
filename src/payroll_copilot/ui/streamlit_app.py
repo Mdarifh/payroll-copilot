@@ -52,10 +52,22 @@ def show_traces(data: dict) -> None:
                 st.caption(f"⚠️ {warning}")
 
 
+def remember(slot: str, key: tuple, value) -> None:
+    """Keep a result across reruns (download, toggles) while its inputs stay the same."""
+    if value is not None:
+        st.session_state.results[slot] = (key, value)
+
+
+def recall(slot: str, key: tuple):
+    saved = st.session_state.results.get(slot)
+    return saved[1] if saved and saved[0] == key else None
+
+
 api = get_client()
 state = st.session_state
 state.setdefault("messages", [])
 state.setdefault("thread_id", uuid4().hex[:12])
+state.setdefault("results", {})
 
 st.title("🧾 AI Payroll Copilot")
 st.caption("Deterministic payroll engine · QA copilot · local demo data only · "
@@ -75,13 +87,17 @@ with st.sidebar:
               for e in employees}  # fmt: skip
     directory = [(e["employee_code"], e["full_name"]) for e in employees]
     code = st.selectbox("Employee", list(labels), format_func=labels.get, key="employee")
-    months = fmt.month_options()
-    period = st.selectbox("Payroll month", months, index=months.index("2026-09"), key="period")
+    default = fmt.default_period(health.get("latest_period"))
+    months = fmt.month_options(default)
+    period = st.selectbox("Payroll month", months, index=months.index(default), key="period")
     use_context = st.toggle("Add selected employee & month to chat questions", value=True,
                             key="use_context")  # fmt: skip
     acting_as = st.text_input("Acting as (user name)", value="hr.user", key="acting_as",
                               help="Sent as X-User; approvals need a user from APPROVERS "
                                    "different from the requester")  # fmt: skip
+    api.user_token = st.text_input("User token", type="password", key="user_token",
+                                   help="Needed when the API sets USER_TOKENS: proves you "
+                                        "are the 'Acting as' user") or None  # fmt: skip
     if st.button("🆕 New conversation", key="new_chat"):
         state.messages = []
         state.thread_id = uuid4().hex[:12]
@@ -143,6 +159,7 @@ OPERATIONS = {
 with calc_tab:
     st.subheader(f"Calculation · {labels.get(code, code)} · {period}")
     choice = st.selectbox("What to calculate", list(OPERATIONS), key="calc_choice")
+    calc_key = (choice, code, period)
     if st.button("Calculate", key="calc_run", type="primary"):
         kind, name = OPERATIONS[choice]
         if kind == "view":
@@ -151,64 +168,73 @@ with calc_tab:
             result = call(api.calculate, "fnf", code)
         else:
             result = call(api.calculate, name, code, period)
-        if result is not None:
-            payslip = result["data"].get("payslip")
-            if payslip:
-                tables = fmt.payslip_tables(payslip)
-                cols = st.columns(3)
-                for col, title in zip(cols, ("Earnings", "Employee deductions",
-                                             "Employer contributions"), strict=True):  # fmt: skip
-                    col.markdown(f"**{title}**")
-                    col.dataframe(pd.DataFrame(tables[title]), hide_index=True,
-                                  width="stretch")  # fmt: skip
-                st.dataframe(pd.DataFrame(tables["Totals"]), hide_index=True)
-            with st.expander("Engine output", expanded=payslip is None):
-                show_text(result["text"])
-            show_traces(result["data"])
+        remember("calc", calc_key, result)
+    if (result := recall("calc", calc_key)) is not None:
+        payslip = result["data"].get("payslip")
+        if payslip:
+            tables = fmt.payslip_tables(payslip)
+            cols = st.columns(3)
+            for col, title in zip(cols, ("Earnings", "Employee deductions",
+                                         "Employer contributions"), strict=True):  # fmt: skip
+                col.markdown(f"**{title}**")
+                col.dataframe(pd.DataFrame(tables[title]), hide_index=True,
+                              width="stretch")  # fmt: skip
+            st.dataframe(pd.DataFrame(tables["Totals"]), hide_index=True)
+        with st.expander("Engine output", expanded=payslip is None):
+            show_text(result["text"])
+        show_traces(result["data"])
 
 # ---------------------------------------------------------------------- expected vs actual
 with eva_tab:
     st.subheader(f"Expected vs Actual · {labels.get(code, code)} · {period}")
     only_issues = st.toggle("Show only issues", value=False, key="eva_only_issues")
+    eva_key = (code, period)
     if st.button("Compare", key="eva_run", type="primary"):
-        result = call(api.validate_employee, code, period)
-        if result is not None:
-            validation = result["data"]["validation"]
-            rows = fmt.comparison_rows(validation, only_issues=only_issues)
-            issues = [r for r in validation["results"]
-                      if r["status"] in ("MISMATCH", "MISSING_ACTUAL", "MISSING_EXPECTED")]
-            c1, c2 = st.columns(2)
-            c1.metric("Components compared", len(validation["results"]))
-            c2.metric("Issues", len(issues))
-            if validation.get("note"):
-                st.info(validation["note"] + " - create it with `payroll-copilot db seed-actual`")
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        remember("eva", eva_key, call(api.validate_employee, code, period))
+    if (result := recall("eva", eva_key)) is not None:
+        validation = result["data"]["validation"]
+        rows = fmt.comparison_rows(validation, only_issues=only_issues)
+        issues = [r for r in validation["results"]
+                  if r["status"] in ("MISMATCH", "MISSING_ACTUAL", "MISSING_EXPECTED")]
+        c1, c2 = st.columns(2)
+        c1.metric("Components compared", len(validation["results"]))
+        c2.metric("Issues", len(issues))
+        if validation.get("note"):
+            st.info(validation["note"] + " - create it with `payroll-copilot db seed-actual`")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------------- QA report
 with qa_tab:
     st.subheader(f"Payroll QA · {period}")
     if st.button("Run QA for the month", key="qa_run", type="primary"):
-        result = call(api.validate_payroll, period)
-        if result is not None:
-            summary, findings = result["data"]["summary"], result["data"]["findings"]
-            cols = st.columns(4)
-            cols[0].metric("Employees checked", summary["employees_checked"])
-            cols[1].metric("Clean", summary["clean"])
-            cols[2].metric("With issues", summary["with_issues"])
-            cols[3].metric("Findings", summary["findings"])
-            st.caption(f"Net pay overpaid {fmt.inr(summary['net_overpaid'])} · underpaid "
-                       f"{fmt.inr(summary['net_underpaid'])} · from "
-                       f"{summary['component_issues']} component mismatches")  # fmt: skip
-            if summary["by_category"]:
-                st.bar_chart(pd.Series(summary["by_category"], name="findings"))
-            st.dataframe(pd.DataFrame(fmt.finding_rows(findings)), hide_index=True,
-                         width="stretch")  # fmt: skip
-            st.download_button("⬇️ Download findings (CSV)", fmt.findings_csv(period, findings),
-                               file_name=f"payroll_qa_{period}.csv", mime="text/csv",
-                               key="qa_download")  # fmt: skip
+        remember("qa", (period,), call(api.validate_payroll, period))
+    if (result := recall("qa", (period,))) is not None:
+        summary, findings = result["data"]["summary"], result["data"]["findings"]
+        cols = st.columns(4)
+        cols[0].metric("Employees checked", summary["employees_checked"])
+        cols[1].metric("Clean", summary["clean"])
+        cols[2].metric("With issues", summary["with_issues"])
+        cols[3].metric("Findings", summary["findings"])
+        st.caption(f"Net pay overpaid {fmt.inr(summary['net_overpaid'])} · underpaid "
+                   f"{fmt.inr(summary['net_underpaid'])} · from "
+                   f"{summary['component_issues']} component mismatches")  # fmt: skip
+        if summary["by_category"]:
+            st.bar_chart(pd.Series(summary["by_category"], name="findings"))
+        st.dataframe(pd.DataFrame(fmt.finding_rows(findings)), hide_index=True,
+                     width="stretch")  # fmt: skip
+        c1, c2 = st.columns(2)
+        c1.download_button("⬇️ Download findings (CSV)", fmt.findings_csv(period, findings),
+                           file_name=f"payroll_qa_{period}.csv", mime="text/csv",
+                           key="qa_download")  # fmt: skip
+        if c2.button("💾 Request save (needs approval)", key="qa_save"):
+            saved = call(api.request_approval, "SAVE_QA_RUN", {"period": period},
+                         acting_as, "Save QA run from the UI")  # fmt: skip
+            if saved:
+                st.success(f"Approval request #{saved['id']} created ({saved['status']}). "
+                           "Another approver approves it in the ✅ Approvals tab.")  # fmt: skip
     runs = call(api.qa_runs) or []
     if runs:
-        st.markdown("**Saved QA runs** (saved with `payroll-copilot qa run --save`)")
+        st.markdown("**Saved QA runs** (stored after an approver approves the save request)")
         st.dataframe(pd.DataFrame([{"Run": r["id"], "Period": r["period"],
                                     "Findings": r["findings"], "Created": r["created_at"]}
                                    for r in runs]), hide_index=True)  # fmt: skip
@@ -218,7 +244,10 @@ with approval_tab:
     st.subheader("Approvals (maker-checker)")
     st.caption(f"Acting as **{acting_as or '-'}**. Write actions run only after a different "
                "user listed in APPROVERS approves them.")  # fmt: skip
-    pending = call(api.approvals, "PENDING") or []
+    if flash := state.pop("approval_flash", None):
+        st.success(flash)
+    approvals = call(api.approvals) or []
+    pending = [a for a in approvals if a["status"] == "PENDING"]
     if not pending:
         st.info("No pending approval requests.")
     for item in pending:
@@ -229,15 +258,18 @@ with approval_tab:
                 st.json(item["preview"], expanded=False)
             comment = st.text_input("Comment", key=f"comment_{item['id']}")
             c1, c2 = st.columns(2)
+            decision = None
             if c1.button("✅ Approve", key=f"approve_{item['id']}"):
-                done = call(api.decide, item["id"], True, acting_as, comment or None)
-                if done:
-                    st.success(f"#{item['id']} {done['status']}: {done.get('result')}")
+                decision = True
             if c2.button("❌ Reject", key=f"reject_{item['id']}"):
-                done = call(api.decide, item["id"], False, acting_as, comment or None)
-                if done:
-                    st.warning(f"#{item['id']} {done['status']}")
-    history = [a for a in (call(api.approvals) or []) if a["status"] != "PENDING"]
+                decision = False
+            if decision is not None:
+                done = call(api.decide, item["id"], decision, acting_as, comment or None)
+                if done:  # rerun so the request moves from pending to decided
+                    result = f": {done['result']}" if done.get("result") else ""
+                    state.approval_flash = f"#{item['id']} {done['status']}{result}"
+                    st.rerun()
+    history = [a for a in approvals if a["status"] != "PENDING"]
     if history:
         st.markdown("**Decided requests**")
         st.dataframe(pd.DataFrame([{"#": a["id"], "Status": a["status"],

@@ -19,6 +19,8 @@ DIRECTORY = [("ARIF-112", "Arif Sharma"), ("EMP-002", "Priya Nair"), ("EMP-003",
     ("EMP-004 arrear Sep 2026", True, Intent.ARREAR),
     ("EMP-006 ka F&F", True, Intent.FNF),
     ("full and final settlement of Anjali", True, Intent.FNF),
+    ("EMP-006 ka gratuity", True, Intent.FNF),
+    ("what is the gratuity rule", False, Intent.KNOWLEDGE),
     ("ARIF-112 PF old vs new rule", True, Intent.PF_COMPARE),
     ("Validate September 2026 payroll", False, Intent.QA_PERIOD),
     ("payroll QA for 2026-09", False, Intent.QA_PERIOD),
@@ -75,6 +77,16 @@ class TestEntities:
     def test_unknown_code(self):
         e = extract_entities("EMP-999 ka PF", DIRECTORY)
         assert e.employee_code is None and e.notes == ["Employee code EMP-999 not found"]
+
+    @pytest.mark.parametrize("text", ["PF kitna hai Sep-2026", "Priya ka PF sept-2026"])
+    def test_month_year_is_not_an_employee_code(self, text):
+        e = extract_entities(text, DIRECTORY)
+        assert e.period == "2026-09" and e.notes == []
+        assert e.employee_code == ("EMP-002" if "Priya" in text else None)
+
+    def test_code_after_a_month_token(self):
+        e = extract_entities("Sep-2026 ka PF for EMP-002", DIRECTORY)
+        assert (e.employee_code, e.period) == ("EMP-002", "2026-09")
 
     def test_state(self):
         assert extract_entities("PT slab in MH", DIRECTORY, {"MH", "KA"}).state == "MH"

@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     # ---------- Approvals ----------
     # Users allowed to approve write actions; empty => nobody can approve (safe default).
     approvers: list[str] = []
+    # API user -> personal token. When set, X-User counts only with a matching X-User-Token,
+    # so nobody can act (or approve) as someone else just by sending their name.
+    user_tokens: dict[str, SecretStr] = {}
 
     @field_validator(
         "llm_model",
@@ -141,6 +144,8 @@ class Settings(BaseSettings):
             problems = self.config_issues()
             if self.api_key is None:
                 problems.append("API_KEY must be set in prod")
+            if self.approvers and not self.user_tokens:
+                problems.append("USER_TOKENS must be set in prod when APPROVERS is set")
             if problems:
                 raise ConfigurationError("; ".join(problems))
         return self
@@ -185,6 +190,7 @@ class Settings(BaseSettings):
             self.anthropic_api_key,
             self.azure_openai_api_key,
             self.api_key,
+            *self.user_tokens.values(),
         ]
         return [s.get_secret_value() for s in secrets if s is not None and s.get_secret_value()]
 
@@ -195,6 +201,8 @@ class Settings(BaseSettings):
             value = getattr(self, name)
             if isinstance(value, SecretStr):
                 shown = "****" + value.get_secret_value()[-4:] if value.get_secret_value() else ""
+            elif name == "user_tokens":
+                shown = f"tokens for {sorted(value)}" if value else "<not set>"
             elif value is None:
                 shown = "<not set>"
             else:

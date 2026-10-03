@@ -2,6 +2,7 @@
 
 import csv
 import io
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -169,11 +170,24 @@ def add_context(prompt: str, employee_code: str | None, period: str | None,
     return f"{prompt} ({', '.join(extra)})" if extra else prompt
 
 
-def month_options(start: str = "2026-04", count: int = 12) -> list[str]:
+def default_period(latest_period: str | None, today: date | None = None) -> str:
+    """Month with the newest data, else the previous calendar month (payroll is run after it)."""
     from payroll_copilot.core.dates import PayrollPeriod
 
-    months, current = [], PayrollPeriod.parse(start)
-    for _ in range(count):
+    if latest_period:
+        return str(PayrollPeriod.parse(latest_period))
+    return str(PayrollPeriod.from_date(today or date.today()).previous())
+
+
+def month_options(center: str, before: int = 12, after: int = 3) -> list[str]:
+    """``before`` months up to ``center``, then ``after`` months (arrears / projections)."""
+    from payroll_copilot.core.dates import PayrollPeriod
+
+    current = PayrollPeriod.parse(center)
+    for _ in range(before):
+        current = current.previous()
+    months = []
+    for _ in range(before + 1 + after):
         months.append(str(current))
         current = current.next()
     return months

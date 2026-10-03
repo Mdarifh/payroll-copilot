@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,7 @@ _ENV_VARS = [
     "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_VERSION",
     "EMBEDDING_PROVIDER", "API_KEY", "COMPARISON_TOLERANCE",
     "DEFAULT_PAID_DAYS_BASIS", "DEFAULT_ROUNDING_MODE", "ALLOW_UNVERIFIED_RULES",
+    "APPROVERS", "USER_TOKENS",
 ]  # fmt: skip
 
 
@@ -88,18 +91,43 @@ def kb_copy(tmp_path):
     return target
 
 
-@pytest.fixture
-def kb(kb_copy, tmp_path, fake_embeddings, make_settings):
-    """Knowledge base with generated rule docs, fake embeddings and a temp Chroma store."""
+@pytest.fixture(scope="session")
+def _kb_template(tmp_path_factory) -> Path:
+    """Generate + ingest the knowledge base once per test session (~10 s each time)."""
+    import shutil
+
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
     from payroll_copilot.rag.service import KnowledgeBase
 
+    root = tmp_path_factory.mktemp("kb_template")
+    shutil.copytree(PROJECT_ROOT / "knowledge_base", root / "knowledge_base")
     base = KnowledgeBase(
-        settings=make_settings(), embeddings=fake_embeddings,
-        persist_dir=tmp_path / "chroma", kb_root=kb_copy,
+        settings=Settings(_env_file=None), embeddings=DeterministicFakeEmbedding(size=64),
+        persist_dir=root / "chroma", kb_root=root / "knowledge_base",
     )  # fmt: skip
     base.generate()
     base.ingest(rebuild=True)
-    return base
+    del base  # release the Chroma client before tests copy its folder
+    return root
+
+
+@pytest.fixture
+def kb(_kb_template, tmp_path, fake_embeddings, make_settings):
+    """Knowledge base with generated rule docs, fake embeddings and a temp Chroma store.
+
+    Each test gets its own copy of the session template, so tests stay isolated.
+    """
+    import shutil
+
+    from payroll_copilot.rag.service import KnowledgeBase
+
+    for folder in ("knowledge_base", "chroma"):
+        shutil.copytree(_kb_template / folder, tmp_path / folder)
+    return KnowledgeBase(
+        settings=make_settings(), embeddings=fake_embeddings,
+        persist_dir=tmp_path / "chroma", kb_root=tmp_path / "knowledge_base",
+    )  # fmt: skip
 
 
 @pytest.fixture

@@ -173,8 +173,12 @@ def test_api_requests_are_audited(seeded_session, kb, make_settings):
     assert pf["actor"] == "api:alice" and pf["details"]["status"] == 200
     assert next(a for a in audit if a["details"]["path"] == "/employees")["actor"] == "api:anonymous"
 
-    chat = client.post("/chat", json={"message": "ARIF-112 ka PF 2026-09", "thread_id": "w1"})
-    assert chat.json()["request_id"]
+    chat = client.post("/chat", json={"message": "ARIF-112 ka PF 2026-09", "thread_id": "w1"},
+                       headers={"X-Request-ID": "req-chat-0001"})  # fmt: skip
+    assert chat.json()["request_id"] == chat.headers["X-Request-ID"] == "req-chat-0001"
+    linked = {a["action"] for a in client.get("/audit", params={"request_id": "req-chat-0001"})
+              .json()}  # fmt: skip
+    assert {"api.request", "chat.ask", "tool.call"} <= linked
     history = client.get("/chat/w1").json()
     assert history["memory"]["last_employee_code"] == "ARIF-112" and len(history["messages"]) == 2
     assert client.delete("/chat/w1").json()["cleared"]

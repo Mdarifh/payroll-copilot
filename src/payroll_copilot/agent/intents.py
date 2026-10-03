@@ -61,7 +61,7 @@ _RULES: list[tuple[Intent, re.Pattern[str]]] = [
                                    r"\blop\b.*\b(kar\s*do|karo|set\s*karo|correct\s*karo)\b")),
     (Intent.ACTION_QA_SAVE, _rx(r"\bsave\b.*\b(qa|validation|report)\b")),
     (Intent.ACTION_RULE_VERIFY, _rx(r"\bverify\b.*\brule\b|\bmark\b.*\bverified\b")),
-    (Intent.FNF, _rx(r"f\s*&\s*f|\bfnf\b|full\s*(and|&)\s*final|settlement")),
+    (Intent.FNF, _rx(r"f\s*&\s*f|\bfnf\b|full\s*(and|&)\s*final|settlement|gratuity")),
     (Intent.ARREAR, _rx(r"arrear")),
     (Intent.PF_COMPARE, _rx(r"\b(pf|epf)\b.*\b(compare|comparison|old|new|purana|naya|v1|v2)\b"
                             r"|\b(compare|old|new|purana|naya)\b.*\b(pf|epf)\b.*\brule")),

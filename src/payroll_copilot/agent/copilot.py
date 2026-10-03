@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from payroll_copilot.agent.actions import NO, YES, reply_word
 from payroll_copilot.agent.graph import build_graph
-from payroll_copilot.audit.context import audit_context, current_actor
+from payroll_copilot.audit.context import audit_context, current_actor, current_request_id
 from payroll_copilot.audit.logger import rule_versions
 from payroll_copilot.core.config import get_settings
 from payroll_copilot.db.models import Employee, PTRule
@@ -112,7 +112,8 @@ class PayrollCopilot:
     def ask(
         self, question: str, thread_id: str = "default", actor: str | None = None
     ) -> CopilotReply:
-        with audit_context(actor=actor) as request_id:
+        # inside an API request reuse its id, so X-Request-ID links the turn and its tool calls
+        with audit_context(actor=actor, request_id=current_request_id()) as request_id:
             config = self._config(thread_id)
             waiting = "submit_action" in (self.graph.get_state(config).next or ())
             if waiting:

@@ -21,6 +21,7 @@ class ApiClient:
         http_client: httpx.Client | None = None,
     ) -> None:
         headers = {"X-API-Key": api_key} if api_key else {}
+        self.user_token: str | None = None  # sent as X-User-Token with X-User (USER_TOKENS)
         self.http = http_client or httpx.Client(base_url=base_url, timeout=timeout)
         self.http.headers.update(headers)
 
@@ -69,10 +70,14 @@ class ApiClient:
         body = {"query": query, **{k: v for k, v in filters.items() if v not in (None, "")}}
         return self._request("POST", "/kb/search", json=body)
 
+    def _as(self, user: str | None) -> dict[str, str]:
+        if not user:
+            return {}
+        return {"X-User": user, **({"X-User-Token": self.user_token} if self.user_token else {})}
+
     def chat(self, message: str, thread_id: str, user: str | None = None) -> dict:
-        headers = {"X-User": user} if user else {}
         return self._request("POST", "/chat", json={"message": message, "thread_id": thread_id},
-                             headers=headers)  # fmt: skip
+                             headers=self._as(user))  # fmt: skip
 
     # approvals (X-User identifies the person acting)
 
@@ -81,7 +86,7 @@ class ApiClient:
 
     def request_approval(self, action_type: str, payload: dict, user: str,
                          reason: str | None = None) -> dict:  # fmt: skip
-        return self._request("POST", "/approvals", headers={"X-User": user},
+        return self._request("POST", "/approvals", headers=self._as(user),
                              json={"action_type": action_type, "payload": payload,
                                    "reason": reason})  # fmt: skip
 
@@ -89,4 +94,4 @@ class ApiClient:
                comment: str | None = None) -> dict:  # fmt: skip
         verb = "approve" if approve else "reject"
         return self._request("POST", f"/approvals/{approval_id}/{verb}",
-                             headers={"X-User": user}, json={"comment": comment})  # fmt: skip
+                             headers=self._as(user), json={"comment": comment})  # fmt: skip

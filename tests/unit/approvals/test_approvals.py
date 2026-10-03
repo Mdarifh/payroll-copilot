@@ -266,3 +266,33 @@ def test_api_approvals(seeded_session, kb, make_settings):
     chat = client.post("/chat", json={"message": "save QA report for 2026-09", "thread_id": "a1"},
                        headers={"X-User": "carol"}).json()  # fmt: skip
     assert chat["pending_action"]["action"] == "SAVE_QA_RUN"
+
+
+def test_api_user_tokens_stop_impersonation(seeded_session, kb, make_settings):
+    from fastapi.testclient import TestClient
+
+    from payroll_copilot.api.main import create_app
+
+    @contextmanager
+    def sessions():
+        yield seeded_session
+
+    settings = make_settings(approvers=["alice"],
+                             user_tokens={"alice": "alice-token-1", "carol": "carol-token-1"})
+    client = TestClient(create_app(settings, sessions=sessions, knowledge_base=lambda: kb))
+    body = {"action_type": "TDS_OVERRIDE", "payload": TDS}
+    carol = {"X-User": "carol", "X-User-Token": "carol-token-1"}
+    assert client.post("/approvals", json=body, headers={"X-User": "carol"}).status_code == 401
+    approval_id = client.post("/approvals", json=body, headers=carol).json()["id"]
+
+    # carol knows alice's name but not her token
+    fake = client.post(f"/approvals/{approval_id}/approve", json={"comment": "ok"},
+                       headers={"X-User": "alice", "X-User-Token": "carol-token-1"})  # fmt: skip
+    assert fake.status_code == 401
+    assert client.get(f"/approvals/{approval_id}").json()["status"] == "PENDING"
+    ok = client.post(f"/approvals/{approval_id}/approve", json={"comment": "ok"},
+                     headers={"X-User": "alice", "X-User-Token": "alice-token-1"})  # fmt: skip
+    assert ok.json()["status"] == "EXECUTED"
+    audit = client.get("/audit", params={"action": "api.request"}).json()
+    assert {a["actor"] for a in audit} >= {"api:anonymous", "api:alice", "api:carol"}
+    assert "alice-token-1" not in str(settings.summary())
