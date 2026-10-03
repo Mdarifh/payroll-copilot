@@ -1,0 +1,11 @@
+module: overtime
+document_name: Overtime policy
+rule_name: OVERTIME
+version: "1"
+effective_from: 2026-04-01
+effective_to: null
+jurisdiction: IN
+source: Demo company payroll policy (fictional) - config/payroll/overtime.yaml
+status: UNVERIFIED
+doc_type: policy
+access_roles: [employee, manager, hr]

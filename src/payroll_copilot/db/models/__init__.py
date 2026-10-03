@@ -1,21 +1,24 @@
 """All ORM models. Importing this package registers every table on Base.metadata."""
 
-from payroll_copilot.db.models.adjustments import (
-    Arrear,
-    FnFSettlement,
-    TDSDeclaration,
-    TDSOverride,
+from payroll_copilot.db.models.actions import ActionRequest
+from payroll_copilot.db.models.adjustments import OvertimeEntry, PayAdjustment
+from payroll_copilot.db.models.audit import AuditLog
+from payroll_copilot.db.models.audit_run import AuditRun
+from payroll_copilot.db.models.batch import (
+    BatchItem,
+    BatchLopItem,
+    PayrollBatch,
+    ValidationResult,
 )
-from payroll_copilot.db.models.attendance import Attendance
-from payroll_copilot.db.models.employee import Company, Employee
-from payroll_copilot.db.models.governance import Approval, AuditLog, QAIssue, QARun
+from payroll_copilot.db.models.chat import ChatMessage, ChatSession
+from payroll_copilot.db.models.employee import Employee
+from payroll_copilot.db.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from payroll_copilot.db.models.payroll import (
-    EmployerContribution,
-    Payroll,
-    PayrollComponent,
-    PayrollDeduction,
-    PayrollEarning,
+    Attendance,
+    Leave,
+    LopRecord,
     PayrollRun,
+    SalaryStructure,
 )
 from payroll_copilot.db.models.rules import (
     ESICRule,
@@ -26,19 +29,12 @@ from payroll_copilot.db.models.rules import (
     TDSRule,
     TDSSlab,
 )
-from payroll_copilot.db.models.salary import (
-    EmployeeSalaryComponent,
-    EmployeeSalaryStructure,
-    SalaryHead,
-    SalaryStructure,
-    SalaryStructureComponent,
-)
+from payroll_copilot.db.models.statutory import CompanySetting, PfCalculationAudit, StatutoryRate
 
 __all__ = [
-    "Approval", "Arrear", "Attendance", "AuditLog", "Company", "ESICRule", "Employee",
-    "EmployeeSalaryComponent", "EmployeeSalaryStructure", "EmployerContribution",
-    "FnFSettlement", "LWFRule", "PFRule", "PTRule", "PTSlab", "Payroll", "PayrollComponent",
-    "PayrollDeduction", "PayrollEarning", "PayrollRun", "QAIssue", "QARun", "SalaryHead",
-    "SalaryStructure", "SalaryStructureComponent", "TDSDeclaration", "TDSOverride", "TDSRule",
-    "TDSSlab",
+    "ActionRequest", "Attendance", "AuditLog", "AuditRun", "BatchItem", "BatchLopItem",
+    "ChatMessage", "ChatSession", "CompanySetting", "ESICRule", "Employee", "KnowledgeChunk",
+    "KnowledgeDocument", "LWFRule", "Leave", "LopRecord", "OvertimeEntry", "PFRule", "PTRule",
+    "PTSlab", "PayAdjustment", "PayrollBatch", "PayrollRun", "PfCalculationAudit",
+    "SalaryStructure", "StatutoryRate", "TDSRule", "TDSSlab", "ValidationResult",
 ]  # fmt: skip

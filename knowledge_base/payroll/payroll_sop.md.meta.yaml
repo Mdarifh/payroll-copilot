@@ -1,0 +1,11 @@
+module: payroll
+document_name: Monthly payroll SOP
+rule_name: PAYROLL_SOP
+version: "1"
+effective_from: 2026-04-01
+effective_to: null
+jurisdiction: IN
+source: Demo company standard operating procedure (fictional)
+status: UNVERIFIED
+doc_type: sop
+access_roles: [hr]

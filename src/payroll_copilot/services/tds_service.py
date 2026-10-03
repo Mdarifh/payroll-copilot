@@ -2,7 +2,6 @@
 
 from decimal import Decimal
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from payroll_copilot.calculations.pay_summary import compute_wage_base
@@ -11,7 +10,7 @@ from payroll_copilot.calculations.tds import Declaration, TDSInput, TDSResult, c
 from payroll_copilot.core.dates import PayrollPeriod
 from payroll_copilot.core.exceptions import RuleNotFoundError
 from payroll_copilot.core.money import RUPEE, format_inr, round_money
-from payroll_copilot.db.models import Employee, TDSDeclaration, TDSOverride
+from payroll_copilot.db.models import Employee
 from payroll_copilot.domain.enums import RuleType
 from payroll_copilot.repositories.payroll_repo import PayrollRepository
 from payroll_copilot.rules.context import build_employee_context
@@ -73,20 +72,8 @@ class TDSService:
         self.payroll = PayrollRepository(session)
 
     def _declarations(self, employee: Employee, fy: str) -> list[Declaration]:
-        rows = self.session.scalars(
-            select(TDSDeclaration).where(
-                TDSDeclaration.employee_id == employee.id,
-                TDSDeclaration.financial_year == fy,
-                TDSDeclaration.regime == employee.tax_regime,
-            )
-        )
-        return [
-            Declaration(
-                section_code=r.section_code,
-                amount=r.proof_amount if r.proof_amount is not None else r.declared_amount,
-            )
-            for r in rows
-        ]
+        """Investment declarations are not captured yet: no section deductions."""
+        return []
 
     def _pt_for_tax(
         self, employee: Employee, period: PayrollPeriod, pt: PTResult | None,
@@ -117,21 +104,15 @@ class TDSService:
         pt: PTResult | None = None,
         override_amount: Decimal | None = None,
         override_reason: str | None = None,
+        regime: str | None = None,
+        declarations: list[Declaration] | None = None,
     ) -> TDSResult:
+        """``regime`` / ``declarations`` override the employee's own (what-if, tax help)."""
         if not salary.salary.lines:
             return TDSResult.not_applicable(f"no earnings in {period}")
-        if override_amount is None:  # an approved override applies unless a what-if is given
-            stored = self.session.scalar(
-                select(TDSOverride).where(
-                    TDSOverride.employee_id == employee.id,
-                    TDSOverride.period == str(period),
-                    TDSOverride.active.is_(True),
-                ).order_by(TDSOverride.id.desc())
-            )
-            if stored is not None:
-                override_amount = stored.amount
-                override_reason = f"approved override #{stored.approval_id}: {stored.reason}"
         context = build_employee_context(employee, period)
+        if regime:
+            context["tax_regime"] = regime
         try:
             resolved = self.rules.resolve(RuleType.TDS, period, context)
         except RuleNotFoundError as exc:
@@ -171,7 +152,8 @@ class TDSService:
                 if rule.allow_professional_tax_deduction
                 else ZERO
             ),
-            declarations=self._declarations(employee, fy.label),
+            declarations=(self._declarations(employee, fy.label) if declarations is None
+                          else declarations),
             remaining_months=remaining,
         )  # fmt: skip
 

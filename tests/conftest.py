@@ -1,37 +1,37 @@
-from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from payroll_copilot.core.config import PROJECT_ROOT, Settings, get_settings
+from payroll_copilot.core.config import PROJECT_ROOT, Settings, get_settings, jwt_signing_key
 from payroll_copilot.db.base import Base
 from payroll_copilot.db.session import create_db_engine, get_engine, get_session_factory
 
 RULES_DIR = PROJECT_ROOT / "config" / "rules"
+TEST_JWT_SECRET = "test-secret-" + "x" * 40
 
 _ENV_VARS = [
-    "APP_ENV", "LOG_LEVEL", "LOG_FORMAT", "DATABASE_URL",
-    "LLM_PROVIDER", "LLM_MODEL", "LLM_TEMPERATURE",
-    "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-    "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_VERSION",
-    "EMBEDDING_PROVIDER", "API_KEY", "COMPARISON_TOLERANCE",
+    "APP_ENV", "LOG_LEVEL", "LOG_FORMAT", "DATABASE_URL", "JWT_SECRET", "JWT_EXPIRE_MINUTES",
+    "LLM_PROVIDER", "LLM_MAX_STEPS", "OLLAMA_MODEL", "OLLAMA_TEMPERATURE", "OLLAMA_BASE_URL",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
     "DEFAULT_PAID_DAYS_BASIS", "DEFAULT_ROUNDING_MODE", "ALLOW_UNVERIFIED_RULES",
-    "APPROVERS", "USER_TOKENS",
+    "LOP_DIVISOR", "LOP_BASE", "LEAVE_ENTITLEMENTS", "CORS_ORIGINS",
 ]  # fmt: skip
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch, tmp_path):
-    """Keep the developer's real environment/.env/database/memory out of every test."""
+def isolated_env(monkeypatch):
+    """Keep the developer's real environment/.env/database out of every test."""
     for name in _ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(Settings.model_config, "env_file", None)
-    monkeypatch.setenv("CHECKPOINT_DB", str(tmp_path / "checkpoints.db"))
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    monkeypatch.setenv("JWT_SECRET", TEST_JWT_SECRET)
+    for cache in (get_settings, get_engine, jwt_signing_key):
+        cache.cache_clear()
     yield
-    get_settings.cache_clear()
-    get_engine.cache_clear()
+    for cache in (get_settings, get_engine, jwt_signing_key):
+        cache.cache_clear()
 
 
 @pytest.fixture
@@ -44,90 +44,69 @@ def make_settings():
     return _make
 
 
-@pytest.fixture
-def engine():
-    engine = create_db_engine("sqlite:///:memory:")
-    import payroll_copilot.db.models  # noqa: F401
+def _memory_engine() -> Engine:
+    import payroll_copilot.db.models  # noqa: F401 - registers all tables
 
+    return create_db_engine("sqlite:///:memory:")
+
+
+@pytest.fixture
+def engine() -> Iterator[Engine]:
+    engine = _memory_engine()
     Base.metadata.create_all(engine)
     yield engine
     engine.dispose()
 
 
 @pytest.fixture
-def session(engine) -> Session:
+def session(engine) -> Iterator[Session]:
     session = get_session_factory(engine)()
     yield session
     session.rollback()
     session.close()
 
 
-@pytest.fixture
-def seeded_session(session) -> Session:
-    """In-memory DB with all repo rules and the demo company loaded."""
+@pytest.fixture(scope="session")
+def _seeded_template() -> Iterator[Engine]:
+    """Rules + demo company, built once per test run (bcrypt hashing is slow on purpose)."""
     from payroll_copilot.db.seed import seed_demo_data
     from payroll_copilot.rules.loader import load_rule_files, sync_rules
 
-    sync_rules(session, load_rule_files(RULES_DIR))
-    seed_demo_data(session)
-    session.commit()
-    return session
+    template = _memory_engine()
+    Base.metadata.create_all(template)
+    from payroll_copilot.services.company_config import sync_defaults
+    from payroll_copilot.services.statutory_rates import sync_rates
+
+    with get_session_factory(template)() as s:
+        sync_rules(s, load_rule_files(RULES_DIR))
+        sync_rates(s)
+        sync_defaults(s)
+        seed_demo_data(s, dummy_employees=0)  # the 6 named people; dummies tested apart
+        s.commit()
+    yield template
+    template.dispose()
 
 
 @pytest.fixture
-def fake_embeddings():
-    from langchain_core.embeddings import DeterministicFakeEmbedding
-
-    return DeterministicFakeEmbedding(size=64)
-
-
-@pytest.fixture
-def kb_copy(tmp_path):
-    """Copy of the repo knowledge base so tests never modify the real one."""
-    import shutil
-
-    target = tmp_path / "knowledge_base"
-    shutil.copytree(PROJECT_ROOT / "knowledge_base", target)
-    return target
-
-
-@pytest.fixture(scope="session")
-def _kb_template(tmp_path_factory) -> Path:
-    """Generate + ingest the knowledge base once per test session (~10 s each time)."""
-    import shutil
-
-    from langchain_core.embeddings import DeterministicFakeEmbedding
-
-    from payroll_copilot.rag.service import KnowledgeBase
-
-    root = tmp_path_factory.mktemp("kb_template")
-    shutil.copytree(PROJECT_ROOT / "knowledge_base", root / "knowledge_base")
-    base = KnowledgeBase(
-        settings=Settings(_env_file=None), embeddings=DeterministicFakeEmbedding(size=64),
-        persist_dir=root / "chroma", kb_root=root / "knowledge_base",
-    )  # fmt: skip
-    base.generate()
-    base.ingest(rebuild=True)
-    del base  # release the Chroma client before tests copy its folder
-    return root
+def seeded_engine(_seeded_template) -> Iterator[Engine]:
+    """A private copy of the seeded template DB for one test."""
+    engine = _memory_engine()
+    source, target = _seeded_template.raw_connection(), engine.raw_connection()
+    try:
+        source.driver_connection.backup(target.driver_connection)
+    finally:
+        source.close()
+        target.close()
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture
-def kb(_kb_template, tmp_path, fake_embeddings, make_settings):
-    """Knowledge base with generated rule docs, fake embeddings and a temp Chroma store.
-
-    Each test gets its own copy of the session template, so tests stay isolated.
-    """
-    import shutil
-
-    from payroll_copilot.rag.service import KnowledgeBase
-
-    for folder in ("knowledge_base", "chroma"):
-        shutil.copytree(_kb_template / folder, tmp_path / folder)
-    return KnowledgeBase(
-        settings=make_settings(), embeddings=fake_embeddings,
-        persist_dir=tmp_path / "chroma", kb_root=tmp_path / "knowledge_base",
-    )  # fmt: skip
+def seeded_session(seeded_engine) -> Iterator[Session]:
+    session = get_session_factory(seeded_engine)()
+    yield session
+    session.rollback()
+    session.close()
 
 
 @pytest.fixture

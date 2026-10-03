@@ -11,6 +11,7 @@ from payroll_copilot.calculations.attendance import (
     diagnose_paid_days,
 )
 from payroll_copilot.calculations.trace import CalculationResult
+from payroll_copilot.core.config import get_settings
 from payroll_copilot.core.dates import PayrollPeriod
 from payroll_copilot.core.exceptions import NotFoundError
 from payroll_copilot.db.models import Employee
@@ -48,8 +49,8 @@ class AttendanceView(BaseModel):
 
 
 def paid_days_basis(employee: Employee) -> PaidDaysBasis:
-    """Employee override, else company default."""
-    return employee.paid_days_basis or employee.company.paid_days_basis
+    """Employee override, else company default (DEFAULT_PAID_DAYS_BASIS)."""
+    return employee.paid_days_basis or get_settings().default_paid_days_basis
 
 
 class AttendanceService:

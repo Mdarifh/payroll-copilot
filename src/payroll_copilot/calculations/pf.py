@@ -61,6 +61,11 @@ class PFResult(BaseModel):
     trace: CalculationResult | None = None
     components: dict[str, CalculationResult] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    # date-segment engine (pf_segments): how the month was split and what changed
+    engine: str = "single-rule"
+    segments: list[dict[str, Any]] = Field(default_factory=list)
+    rule_versions: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)  # config, sources, OLD comparison
 
     @classmethod
     def not_applicable(cls, reason: str) -> "PFResult":

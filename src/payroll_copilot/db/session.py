@@ -20,15 +20,20 @@ def create_db_engine(url: str, echo: bool = False) -> Engine:
         kwargs = {"poolclass": StaticPool, "connect_args": {"check_same_thread": False}}
     elif url.startswith("sqlite:///"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
+        # wait (instead of failing) while the batch worker holds the write lock
+        kwargs = {"connect_args": {"timeout": 30, "check_same_thread": False}}
     engine = create_engine(url, echo=echo, **kwargs)
     if engine.dialect.name == "sqlite":
-        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+        event.listen(engine, "connect", _configure_sqlite)
     return engine
 
 
-def _enable_sqlite_foreign_keys(dbapi_connection, _record) -> None:
+def _configure_sqlite(dbapi_connection, _record) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL: readers don't block the batch worker's writes and vice versa (file DBs only)
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
 
 

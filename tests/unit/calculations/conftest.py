@@ -1,24 +1,14 @@
 import pytest
 
-from payroll_copilot.db.seed import DEFAULT_SEED_FILE
 from payroll_copilot.domain.salary import SalaryHeadInfo, StructureTemplate
-from payroll_copilot.rules.loader import read_yaml
+from payroll_copilot.services.salary_config import salary_heads, structure_templates
 
 
 @pytest.fixture(scope="session")
-def seed_data() -> dict:
-    return read_yaml(DEFAULT_SEED_FILE)
+def heads() -> dict[str, SalaryHeadInfo]:
+    return salary_heads()
 
 
 @pytest.fixture(scope="session")
-def heads(seed_data) -> dict[str, SalaryHeadInfo]:
-    return {h["code"]: SalaryHeadInfo(**h) for h in seed_data["salary_heads"]}
-
-
-@pytest.fixture(scope="session")
-def templates(seed_data) -> dict[str, StructureTemplate]:
-    return {
-        s["code"]: StructureTemplate(code=s["code"], version=s["version"], name=s["name"],
-                                     components=s["components"])
-        for s in seed_data["salary_structures"]
-    }  # fmt: skip
+def templates() -> dict[str, StructureTemplate]:
+    return structure_templates()

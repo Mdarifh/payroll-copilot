@@ -28,16 +28,21 @@ def test_json_formatter():
 
 
 def test_cli_check_config_masks_secret(monkeypatch, capsys):
-    monkeypatch.setenv("LLM_PROVIDER", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-print-5678")
+    monkeypatch.setenv("JWT_SECRET", "jwt-should-not-print-" + "y" * 20 + "5678")
     assert main(["check-config"]) == 0
     out = capsys.readouterr().out
-    assert "sk-should-not-print" not in out
+    assert "jwt-should-not-print" not in out
     assert "****5678" in out
-    assert "LLM_MODEL is not set" in out
+
+
+def test_cli_warns_about_short_jwt_secret(monkeypatch, capsys):
+    monkeypatch.setenv("JWT_SECRET", "short")
+    assert main(["check-config"]) == 0
+    assert "at least 32 characters" in capsys.readouterr().out
 
 
 def test_cli_reports_prod_config_error(monkeypatch, capsys):
     monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.delenv("JWT_SECRET")
     assert main(["check-config"]) == 1
     assert "Configuration error" in capsys.readouterr().out

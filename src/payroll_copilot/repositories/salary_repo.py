@@ -1,35 +1,23 @@
+"""Salary heads/templates (config) and per-employee structure rows (salary_structure)."""
+
+from collections import defaultdict
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from payroll_copilot.core.dates import date_ranges_overlap
 from payroll_copilot.core.exceptions import NotFoundError
-from payroll_copilot.db.models import EmployeeSalaryStructure, SalaryHead, SalaryStructure
+from payroll_copilot.db.models import SalaryStructure
+from payroll_copilot.domain.enums import AssignmentReason
 from payroll_copilot.domain.salary import (
     PayLine,
     SalaryAssignmentInfo,
     SalaryHeadInfo,
     StructureTemplate,
 )
-
-
-def _template(structure: SalaryStructure) -> StructureTemplate:
-    return StructureTemplate.model_validate(structure)
-
-
-def _assignment(row: EmployeeSalaryStructure) -> SalaryAssignmentInfo:
-    return SalaryAssignmentInfo(
-        structure=_template(row.structure),
-        monthly_gross=row.monthly_gross,
-        annual_ctc=row.annual_ctc,
-        effective_from=row.effective_from,
-        effective_to=row.effective_to,
-        reason=row.reason,
-        components=[
-            PayLine(head_code=c.head_code, amount=c.monthly_amount) for c in row.components
-        ],
-    )
+from payroll_copilot.services.salary_config import salary_heads, structure_templates
 
 
 class SalaryRepository:
@@ -37,41 +25,42 @@ class SalaryRepository:
         self.session = session
 
     def heads(self) -> dict[str, SalaryHeadInfo]:
-        rows = self.session.scalars(select(SalaryHead).order_by(SalaryHead.display_order))
-        return {row.code: SalaryHeadInfo.model_validate(row) for row in rows}
+        return salary_heads()
 
     def template(self, code: str, version: int | None = None) -> StructureTemplate:
-        stmt = (
-            select(SalaryStructure)
-            .where(SalaryStructure.code == code)
-            .options(selectinload(SalaryStructure.components))
-            .order_by(SalaryStructure.version.desc())
-        )
-        if version is not None:
-            stmt = stmt.where(SalaryStructure.version == version)
-        row = self.session.scalars(stmt).first()
-        if row is None:
-            which = version or "latest"
-            raise NotFoundError(f"Salary structure {code} (version {which}) not found")
-        return _template(row)
+        template = structure_templates().get(code)
+        if template is None or (version is not None and template.version != version):
+            raise NotFoundError(f"Salary structure {code} (version {version or 'latest'}) "
+                                "not found")  # fmt: skip
+        return template
 
     def assignments_between(
         self, employee_id: int, start: date, end: date
     ) -> list[SalaryAssignmentInfo]:
-        """Assignments overlapping [start, end], oldest first."""
+        """Structure versions (rows grouped by effective_from) overlapping [start, end]."""
         rows = self.session.scalars(
-            select(EmployeeSalaryStructure)
-            .where(EmployeeSalaryStructure.employee_id == employee_id)
-            .options(
-                selectinload(EmployeeSalaryStructure.components),
-                selectinload(EmployeeSalaryStructure.structure).selectinload(
-                    SalaryStructure.components
-                ),
-            )
-            .order_by(EmployeeSalaryStructure.effective_from)
+            select(SalaryStructure)
+            .where(SalaryStructure.employee_id == employee_id)
+            .order_by(SalaryStructure.effective_from, SalaryStructure.id)
         )
-        return [
-            _assignment(row)
-            for row in rows
-            if date_ranges_overlap(row.effective_from, row.effective_to, start, end)
-        ]
+        versions: dict[date, list[SalaryStructure]] = defaultdict(list)
+        for row in rows:
+            versions[row.effective_from].append(row)
+        heads = self.heads()
+        result = []
+        for i, (effective_from, lines) in enumerate(sorted(versions.items())):
+            effective_to = lines[0].effective_to
+            if not date_ranges_overlap(effective_from, effective_to, start, end):
+                continue
+            components = [PayLine(head_code=r.head_code, amount=r.monthly_amount) for r in lines]
+            gross = sum((c.amount for c in components if heads[c.head_code].part_of_gross),
+                        Decimal(0))  # fmt: skip
+            code = lines[0].template_code
+            result.append(SalaryAssignmentInfo(
+                structure=self.template(code) if code else StructureTemplate(
+                    code="CUSTOM", version=1, name="Custom structure", components=[]),
+                monthly_gross=gross, effective_from=effective_from, effective_to=effective_to,
+                reason=AssignmentReason.JOINING if i == 0 else AssignmentReason.REVISION,
+                components=components,
+            ))  # fmt: skip
+        return result

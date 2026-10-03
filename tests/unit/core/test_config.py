@@ -6,55 +6,59 @@ from pydantic import ValidationError
 from payroll_copilot.core.config import (
     PROJECT_ROOT,
     LLMProvider,
+    LopBase,
+    LopDivisor,
     PaidDaysBasis,
     Settings,
     get_settings,
+    jwt_signing_key,
 )
 from payroll_copilot.core.exceptions import ConfigurationError
 from payroll_copilot.core.money import RoundingMode
 
+GOOD_SECRET = "a" * 32
+
 
 def test_defaults(make_settings):
-    settings = make_settings()
+    settings = make_settings(jwt_secret=None)
     assert settings.app_env == "dev"
-    assert settings.llm_provider is LLMProvider.NONE
-    assert not settings.llm_enabled
+    assert settings.llm_provider is LLMProvider.OLLAMA and settings.llm_enabled
+    assert settings.llm_model == "qwen2.5:7b"
+    assert settings.anthropic_model == "claude-sonnet-5" and settings.anthropic_api_key is None
     assert settings.default_paid_days_basis is PaidDaysBasis.CALENDAR
     assert settings.default_rounding_mode is RoundingMode.HALF_UP
-    assert settings.comparison_tolerance == Decimal("0")
+    assert (settings.lop_divisor, settings.lop_base) == (LopDivisor.CALENDAR, LopBase.GROSS)
+    assert settings.leave_entitlements == {"CL": 12, "SL": 12, "EL": 18}
     assert settings.is_sqlite
     assert settings.config_issues() == []
 
 
 def test_env_vars_override(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    monkeypatch.setenv("LLM_MODEL", "some-model")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-abcd1234")
-    monkeypatch.setenv("COMPARISON_TOLERANCE", "1")
+    monkeypatch.setenv("LLM_PROVIDER", "none")
+    monkeypatch.setenv("LOP_DIVISOR", "WORKING_DAYS")
+    monkeypatch.setenv("LOP_BASE", "BASIC")
+    monkeypatch.setenv("LEAVE_ENTITLEMENTS", '{"CL": 10, "SL": 7}')
     settings = Settings(_env_file=None)
-    assert settings.llm_provider is LLMProvider.ANTHROPIC
-    assert settings.comparison_tolerance == Decimal("1")
-    assert settings.config_issues() == []
+    assert not settings.llm_enabled
+    assert (settings.lop_divisor, settings.lop_base) == (LopDivisor.WORKING_DAYS, LopBase.BASIC)
+    assert settings.leave_entitlements == {"CL": Decimal(10), "SL": Decimal(7)}
 
 
-def test_blank_env_values_mean_not_set(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "")
-    monkeypatch.setenv("LLM_MODEL", "  ")
-    settings = Settings(_env_file=None)
-    assert settings.openai_api_key is None
-    assert settings.llm_model is None
+def test_blank_jwt_secret_means_not_set(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "  ")
+    assert Settings(_env_file=None).jwt_secret is None
 
 
 def test_relative_paths_resolve_to_project_root(make_settings):
     settings = make_settings(rules_dir="./config/rules")
     assert settings.rules_dir == (PROJECT_ROOT / "config" / "rules").resolve()
-    assert settings.knowledge_base_dir.is_absolute()
+    assert settings.salary_heads_file.is_absolute() and settings.salary_heads_file.exists()
 
 
 def test_sqlite_url_resolved_to_absolute(make_settings):
     url = make_settings().database_url
     assert url.startswith("sqlite:///")
-    assert url.endswith("/data/payroll.db")
+    assert url.endswith("/data/chatbot.db")
     assert (PROJECT_ROOT / "data").as_posix() in url
 
 
@@ -65,19 +69,17 @@ def test_non_sqlite_url_untouched(make_settings):
     assert not settings.is_sqlite
 
 
-@pytest.mark.parametrize(
-    ("overrides", "expected_fragment"),
-    [
-        ({"llm_provider": "openai", "llm_model": "m"}, "OPENAI_API_KEY"),
-        ({"llm_provider": "anthropic", "llm_model": "m"}, "ANTHROPIC_API_KEY"),
-        ({"llm_provider": "azure_openai", "llm_model": "m"}, "AZURE_OPENAI_ENDPOINT"),
-        ({"llm_provider": "ollama"}, "LLM_MODEL"),
-        ({"embedding_provider": "openai"}, "OPENAI_API_KEY"),
-    ],
-)
-def test_config_issues(make_settings, overrides, expected_fragment):
-    issues = make_settings(**overrides).config_issues()
-    assert any(expected_fragment in issue for issue in issues)
+def test_anthropic_needs_an_api_key(make_settings):
+    issues = make_settings(llm_provider="anthropic").config_issues()
+    assert any("ANTHROPIC_API_KEY" in i for i in issues)
+    settings = make_settings(llm_provider="anthropic", anthropic_api_key="sk-ant-test-9876")
+    assert settings.config_issues() == [] and settings.llm_model == "claude-sonnet-5"
+    assert settings.summary()["anthropic_api_key"] == "****9876"
+    assert "sk-ant-test-9876" in settings.secret_values()
+
+
+def test_short_jwt_secret_is_an_issue(make_settings):
+    assert any("at least 32" in i for i in make_settings(jwt_secret="short").config_issues())
 
 
 @pytest.mark.parametrize(
@@ -86,7 +88,9 @@ def test_config_issues(make_settings, overrides, expected_fragment):
         {"llm_provider": "gemini-pro-max"},
         {"default_paid_days_basis": "FIXED_31"},
         {"default_rounding_mode": "ROUND_ANYHOW"},
-        {"comparison_tolerance": "-1"},
+        {"lop_divisor": "FIXED_31"},
+        {"lop_base": "CTC"},
+        {"jwt_expire_minutes": 1},
         {"api_port": 70000},
     ],
 )
@@ -95,43 +99,33 @@ def test_invalid_values_rejected(make_settings, overrides):
         make_settings(**overrides)
 
 
-def test_prod_fails_fast_on_incomplete_config(make_settings):
-    with pytest.raises(ConfigurationError, match="API_KEY"):
-        make_settings(app_env="prod", llm_provider="openai", llm_model="m")
-
-
-def test_prod_ok_when_complete(make_settings):
-    settings = make_settings(
-        app_env="prod", llm_provider="openai", llm_model="m",
-        openai_api_key="sk-real-9999", api_key="api-key-7777",
-    )  # fmt: skip
-    assert settings.app_env == "prod"
-
-
-def test_prod_approvers_need_user_tokens(make_settings):
-    complete = {"app_env": "prod", "llm_provider": "openai", "llm_model": "m",
-                "openai_api_key": "sk-real-9999", "api_key": "api-key-7777",
-                "approvers": ["alice"]}  # fmt: skip
-    with pytest.raises(ConfigurationError, match="USER_TOKENS"):
-        make_settings(**complete)
-    settings = make_settings(**complete, user_tokens={"alice": "tok-alice-1"})
-    assert "tok-alice-1" in settings.secret_values()
-    assert settings.summary()["user_tokens"] == "tokens for ['alice']"
+def test_prod_needs_a_strong_jwt_secret(make_settings):
+    with pytest.raises(ConfigurationError, match="JWT_SECRET must be set"):
+        make_settings(app_env="prod", jwt_secret=None)
+    with pytest.raises(ConfigurationError, match="at least 32"):
+        make_settings(app_env="prod", jwt_secret="short")
+    assert make_settings(app_env="prod", jwt_secret=GOOD_SECRET).app_env == "prod"
 
 
 def test_secrets_never_leak(make_settings):
-    secret = "sk-supersecret-abcd1234"
+    secret = "jwt-supersecret-" + "z" * 16 + "abcd"
     settings = make_settings(
-        openai_api_key=secret,
-        database_url="postgresql://payroll:dbpass@host:5432/payroll",
-    )
+        jwt_secret=secret, database_url="postgresql://payroll:dbpass@host:5432/payroll",
+    )  # fmt: skip
     summary = settings.summary()
     assert secret not in repr(settings)
     assert secret not in str(summary)
-    assert summary["openai_api_key"] == "****1234"
-    assert "dbpass" not in summary["database_url"]
+    assert summary["jwt_secret"] == "****abcd"
     assert summary["database_url"] == "postgresql://payroll:****@host:5432/payroll"
     assert settings.secret_values() == [secret]
+
+
+def test_dev_without_jwt_secret_gets_a_random_key(monkeypatch):
+    monkeypatch.delenv("JWT_SECRET")
+    get_settings.cache_clear()
+    jwt_signing_key.cache_clear()
+    key = jwt_signing_key()
+    assert len(key) >= 32 and jwt_signing_key() == key  # stable within the process
 
 
 def test_get_settings_is_cached():

@@ -1,7 +1,7 @@
 [project]
-name = "ai-payroll-copilot"
+name = "payroll-chatbot"
 version = "0.1.0"
-description = "AI Payroll Copilot - deterministic payroll engine with LangChain/LangGraph assistant"
+description = "Payroll chatbot for an Indian company: deterministic payroll engine + LLM tool calling"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,31 +10,21 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "alembic>=1.14",
     "pyyaml>=6.0",
-    # RAG (Phase 12)
-    "langchain-core>=0.3",
-    "langchain-text-splitters>=0.3",
-    "langchain-chroma>=0.2",
-    "langchain-huggingface>=0.1",
-    "chromadb>=0.5",
-    "sentence-transformers>=3.0",
-    "pypdf>=5.0",
-    "docx2txt>=0.8",
-    "rank-bm25>=0.2",
-    # LLM (Phase 13) - free local models via Ollama
-    "langchain-ollama>=0.2",
-    "httpx>=0.27",
-    # Orchestration (Phase 14)
-    "langgraph>=0.2",
-    "langgraph-checkpoint-sqlite>=2.0",
-    # API (Phase 16)
+    # API + auth
     "fastapi>=0.115",
     "uvicorn>=0.30",
-    # UI (Phase 17)
-    "streamlit>=1.40",
+    "python-multipart>=0.0.9",  # login form for the Swagger "Authorize" button
+    "pyjwt>=2.9",
+    "bcrypt>=4.2",
+    # LLM (Ollama over HTTP, Phase 2)
+    "httpx>=0.27",
+    "anthropic>=1.0",
+    "fpdf2>=2.8",
+    "openpyxl>=3.1",
 ]
 
 [project.scripts]
-payroll-copilot = "payroll_copilot.__main__:main"
+payroll-chatbot = "payroll_copilot.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -54,7 +44,7 @@ packages = ["src/payroll_copilot"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers"
-markers = ["slow: uses the real local embedding model (skipped if not downloaded)"]
+markers = ["slow: long-running tests"]
 
 [tool.coverage.run]
 source = ["payroll_copilot"]
@@ -75,3 +65,7 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.isort]
 known-third-party = ["alembic"]  # local alembic/ folder is not the package
 known-first-party = ["payroll_copilot", "tests"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency markers are meant to be used as argument defaults
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]

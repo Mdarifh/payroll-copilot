@@ -21,6 +21,14 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def iso_utc(value: datetime | None) -> str | None:
+    """ISO text with an explicit UTC offset. SQLite returns stored times without a timezone;
+    they are UTC (utc_now), so a browser must not read them as local time."""
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
+
+
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 

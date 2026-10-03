@@ -1,112 +1,160 @@
 """FastAPI application.
 
-* Every endpoint except /health requires ``X-API-Key`` when API_KEY is set
-  (always set in prod; optional in dev for local use).
-* Engine operations are the same functions the LangChain tools use; domain errors
-  become 404 (not found), 422 (invalid data / rules) or 503 (configuration).
-* Money in responses is a string (never a float).
+* Login with email + password -> JWT access token (``Authorization: Bearer ...``).
+* Every endpoint except /health and login needs a valid token; HR-only endpoints
+  check the role in the backend.
+* ``POST /chat``: the LLM picks tools for the logged-in user; the reply is a list of
+  typed messages (``text``, ``payslip_card``, ...) for the frontend to render.
+* Errors are JSON ``{"error", "detail"}``: 401 not logged in, 403 wrong role,
+  404 not found, 422 invalid input, 503 LLM / configuration unavailable.
 """
 
 import logging
 import re
-import secrets
-import time
 from collections.abc import Callable
+from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
-from pydantic import ValidationError
-from sqlalchemy import func, select, text
+from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import Engine, select, text
+from sqlalchemy.orm import Session
 
 from payroll_copilot import __version__
+from payroll_copilot.api.actions import router as actions_router
+from payroll_copilot.api.audits import router as audits_router
+from payroll_copilot.api.batches import router as batch_router
+from payroll_copilot.api.batches import runs_router
+from payroll_copilot.api.directory import router as directory_router
+from payroll_copilot.api.knowledge import router as knowledge_router
+from payroll_copilot.api.leaves import router as leaves_router
+from payroll_copilot.api.overview import router as overview_router
+from payroll_copilot.api.payroll import router as payroll_router
+from payroll_copilot.api.reports import router as reports_router
 from payroll_copilot.api.schemas import (
-    ApprovalDecision,
-    ApprovalRequest,
     ChatRequest,
-    EmployeePeriodRequest,
-    EmployeeRequest,
-    OperationResponse,
-    PeriodRequest,
-    TDSRequest,
+    ChatResponse,
+    LoginRequest,
+    TokenResponse,
+    UserOut,
 )
-from payroll_copilot.audit.context import audit_context
+from payroll_copilot.api.settings import router as settings_router
+from payroll_copilot.auth import service as auth_service
+from payroll_copilot.auth.deps import current_user, get_session, require_hr
+from payroll_copilot.chat.agent import ChatAgent
+from payroll_copilot.chat.tools import ToolContext, tools_for
 from payroll_copilot.core.config import Settings, get_settings
-from payroll_copilot.core.dates import PayrollPeriod
+from payroll_copilot.core.dates import parse_month
 from payroll_copilot.core.exceptions import (
+    AuthError,
     ConfigurationError,
     NotFoundError,
     PayrollCopilotError,
-    PeriodError,
+    PermissionDeniedError,
 )
-from payroll_copilot.db.models import Attendance, Employee
-from payroll_copilot.rag.service import KnowledgeBase
-from payroll_copilot.services.approval_service import (
-    ApprovalError,
-    ApprovalPermissionError,
-    ApprovalService,
-)
-from payroll_copilot.tools.registry import SessionProvider, ToolContext, build_tools, operations
-from payroll_copilot.tools.schemas import PolicySearchArgs
+from payroll_copilot.db.models import Employee
+from payroll_copilot.db.session import get_engine, get_session_factory
+from payroll_copilot.llm import get_chat_model
+from payroll_copilot.llm.base import ChatModel, LLMUnavailableError
+from payroll_copilot.repositories.payroll_repo import PayrollRepository
+from payroll_copilot.services import audit
+from payroll_copilot.services.action_center import ActionConflictError
+from payroll_copilot.services.batch_service import BatchConflictError
+from payroll_copilot.services.batch_worker import BatchWorker
+from payroll_copilot.services.payslip_pdf import render_payslip_pdf
 
 log = logging.getLogger(__name__)
-
-_USER = re.compile(r"^[\w.@-]{1,64}$")
 _REQUEST_ID = re.compile(r"^[\w-]{8,64}$")
-_NOT_AUDITED = {"/health", "/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"}
 
 
-def _period(value: str) -> str:
-    try:
-        return str(PayrollPeriod.parse(value))
-    except PeriodError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+def user_out(e: Employee) -> UserOut:
+    return UserOut(employee_id=e.id, employee_code=e.employee_code, full_name=e.full_name,
+                   email=e.email, role=e.role.value, department=e.department,
+                   designation=e.designation)  # fmt: skip
+
+
+_DEFAULT_MODEL: Any = object()  # "build the model from settings"
 
 
 def create_app(
-    settings: Settings | None = None,
-    sessions: SessionProvider | None = None,
-    knowledge_base: Callable[[], KnowledgeBase] | None = None,
-    copilot_factory: Callable[[ToolContext], Any] | None = None,
-) -> FastAPI:
+    settings: Settings | None = None, engine: Engine | None = None,
+    chat_model: ChatModel | None = _DEFAULT_MODEL, today: Callable[[], date] = date.today,
+    worker: BatchWorker | None = _DEFAULT_MODEL,
+) -> FastAPI:  # fmt: skip
     settings = settings or get_settings()
-    ctx = ToolContext(**({"sessions": sessions} if sessions else {}),
-                      knowledge_base=knowledge_base)  # fmt: skip
-    ops = operations(ctx)
-    app = FastAPI(
-        title="AI Payroll Copilot API",
-        version=__version__,
-        description="Deterministic payroll engine, QA and policy search. Local data only.",
-    )
-    app.state.copilot = None
 
-    if settings.api_key is None:
-        log.warning("API_KEY not set: API is unauthenticated (allowed only outside prod)")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # the bulk payroll worker lives as long as the API; on start it resumes batches
+        # that were running when the API stopped
+        if app.state.worker is not None:
+            app.state.worker.start()
+        _sync_knowledge(app)
+        yield
+        if app.state.worker is not None:
+            app.state.worker.stop()
 
-    def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-        expected = settings.api_key.get_secret_value() if settings.api_key else None
-        if expected is None:
-            return
-        if x_api_key is None or not secrets.compare_digest(x_api_key, expected):
-            raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+    def _sync_knowledge(app: FastAPI) -> None:
+        from payroll_copilot.services.knowledge import ingest
+
+        try:
+            with app.state.session_factory() as session:
+                result = ingest(session)
+                session.commit()
+            log.info("knowledge base synced: %s", result)
+        except Exception:  # noqa: BLE001 - the API must start even if a document is broken
+            log.exception("knowledge base sync failed")
+
+    app = FastAPI(title=f"{settings.app_name} API", version=__version__, lifespan=lifespan,
+                  description="Payroll chatbot backend. Local demo data only.")  # fmt: skip
+    app.state.session_factory = get_session_factory(engine or get_engine())
+    if worker is _DEFAULT_MODEL:
+        worker = (BatchWorker(app.state.session_factory) if settings.batch_worker_enabled
+                  else None)  # fmt: skip
+    app.state.worker = worker
+    app.state.today = today
+    app.state.chat_agent = None
+
+    def chat_agent() -> ChatAgent:
+        if app.state.chat_agent is None:
+            model = get_chat_model(settings) if chat_model is _DEFAULT_MODEL else chat_model
+            app.state.chat_agent = ChatAgent(model, max_steps=settings.llm_max_steps)
+        return app.state.chat_agent
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
+                       allow_methods=["*"], allow_headers=["*"])  # fmt: skip
 
     # ------------------------------------------------------------------ errors
 
-    def _error(status: int, exc: Exception) -> JSONResponse:
-        return JSONResponse(status_code=status,
+    def _error(status: int, exc: Exception, headers: dict | None = None) -> JSONResponse:
+        return JSONResponse(status_code=status, headers=headers,
                             content={"error": type(exc).__name__, "detail": str(exc)})
+
+    @app.exception_handler(AuthError)
+    async def _unauthorised(_: Request, exc: AuthError) -> JSONResponse:
+        return _error(401, exc, {"WWW-Authenticate": "Bearer"})
+
+    @app.exception_handler(PermissionDeniedError)
+    async def _forbidden(_: Request, exc: PermissionDeniedError) -> JSONResponse:
+        return _error(403, exc)
 
     @app.exception_handler(NotFoundError)
     async def _not_found(_: Request, exc: NotFoundError) -> JSONResponse:
         return _error(404, exc)
 
-    @app.exception_handler(ApprovalPermissionError)
-    async def _forbidden(_: Request, exc: ApprovalPermissionError) -> JSONResponse:
-        return _error(403, exc)
+    @app.exception_handler(LLMUnavailableError)
+    async def _llm_down(_: Request, exc: LLMUnavailableError) -> JSONResponse:
+        return _error(503, exc)
 
-    @app.exception_handler(ApprovalError)
-    async def _conflict(_: Request, exc: ApprovalError) -> JSONResponse:
+    @app.exception_handler(BatchConflictError)
+    async def _conflict(_: Request, exc: BatchConflictError) -> JSONResponse:
+        return _error(409, exc)
+
+    @app.exception_handler(ActionConflictError)
+    async def _action_conflict(_: Request, exc: ActionConflictError) -> JSONResponse:
         return _error(409, exc)
 
     @app.exception_handler(ConfigurationError)
@@ -117,279 +165,141 @@ def create_app(
     async def _domain(_: Request, exc: PayrollCopilotError) -> JSONResponse:
         return _error(422, exc)
 
-    @app.exception_handler(ValidationError)
-    async def _invalid(_: Request, exc: ValidationError) -> JSONResponse:
-        detail = "; ".join(
-            f"{'.'.join(str(p) for p in e['loc'])}: {e['msg'].removeprefix('Value error, ')}"
-            for e in exc.errors()
-        )
-        return JSONResponse(status_code=422, content={"error": "ValidationError", "detail": detail})
-
-    def run(name: str, **kwargs: Any) -> OperationResponse:
-        content, artifact = ops[name](**kwargs)
-        return OperationResponse(text=content, data=artifact)
-
-    # ------------------------------------------------------------------ audit middleware
-
-    def verified(user: str | None, token: str | None) -> bool:
-        """A well-formed X-User; with USER_TOKENS set it also needs that user's own token."""
-        if not user or not _USER.match(user):
-            return False
-        if not settings.user_tokens:
-            return True
-        expected = settings.user_tokens.get(user)
-        return bool(expected and token
-                    and secrets.compare_digest(token, expected.get_secret_value()))  # fmt: skip
-
     @app.middleware("http")
-    async def audit_requests(request: Request, call_next):
-        user = request.headers.get("X-User", "")
-        token = request.headers.get("X-User-Token")
-        actor = f"api:{user}" if verified(user, token) else "api:anonymous"
-        request_id = request.headers.get("X-Request-ID", "")
-        request_id = request_id if _REQUEST_ID.match(request_id) else None
-        start = time.perf_counter()
-        with audit_context(actor=actor, request_id=request_id) as rid:
-            response = await call_next(request)
-            if request.url.path not in _NOT_AUDITED:
-                await run_in_threadpool(
-                    ctx.audit.log, "api.request", entity="endpoint", entity_id=request.url.path,
-                    details={"method": request.method, "path": request.url.path,
-                             "query": dict(request.query_params), "status": response.status_code,
-                             "duration_ms": round((time.perf_counter() - start) * 1000)},
-                )  # fmt: skip
-            response.headers["X-Request-ID"] = rid
+    async def request_id(request: Request, call_next):
+        rid = request.headers.get("X-Request-ID", "")
+        request.state.request_id = rid if _REQUEST_ID.match(rid) else uuid4().hex[:16]
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.state.request_id
         return response
 
     # ------------------------------------------------------------------ health
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, Any]:
-        latest_period = None
         try:
-            with ctx.sessions() as s:
+            with app.state.session_factory() as s:
                 s.execute(text("SELECT 1"))
-                latest_period = s.scalar(select(func.max(Attendance.period)))
             database = "ok"
         except Exception as exc:  # noqa: BLE001 - health must report, not raise
             database = f"error: {exc.__class__.__name__}"
         return {"status": "ok" if database == "ok" else "degraded", "version": __version__,
-                "database": database, "llm_provider": settings.llm_provider.value,
-                "latest_period": latest_period}  # fmt: skip
+                "database": database, "llm_provider": settings.llm_provider.value}  # fmt: skip
 
-    api = APIRouter(dependencies=[Depends(require_api_key)])
+    # ------------------------------------------------------------------ auth
 
-    # ------------------------------------------------------------------ employees
+    @app.post("/auth/login", tags=["auth"], response_model=TokenResponse)
+    def login(body: LoginRequest, request: Request,
+              session: Session = Depends(get_session)) -> TokenResponse:  # fmt: skip
+        user, token, expires = auth_service.login(session, body.email, body.password,
+                                                  request.state.request_id)  # fmt: skip
+        return TokenResponse(access_token=token, expires_at=expires, user=user_out(user))
 
-    @api.get("/employees", tags=["employees"])
-    def list_employees() -> list[dict[str, Any]]:
-        with ctx.sessions() as s:
-            rows = s.scalars(select(Employee).order_by(Employee.employee_code))
-            return [{"employee_code": e.employee_code, "full_name": e.full_name,
-                     "work_state": e.work_state, "status": e.status.value,
-                     "doj": e.doj.isoformat(), "lwd": e.lwd.isoformat() if e.lwd else None}
-                    for e in rows]  # fmt: skip
+    @app.post("/auth/token", tags=["auth"], summary="Login form (Swagger 'Authorize' button)")
+    def token(request: Request, form: OAuth2PasswordRequestForm = Depends(),
+              session: Session = Depends(get_session)) -> dict[str, str]:  # fmt: skip
+        _, access, _ = auth_service.login(session, form.username, form.password,
+                                          request.state.request_id)  # fmt: skip
+        return {"access_token": access, "token_type": "bearer"}
 
-    @api.get("/employees/{employee_code}", tags=["employees"])
-    def get_employee(employee_code: str) -> OperationResponse:
-        return run("get_employee", employee_code=EmployeeRequest(employee_code=employee_code)
-                   .employee_code)  # fmt: skip
+    @app.get("/auth/me", tags=["auth"], response_model=UserOut)
+    def me(user: Employee = Depends(current_user)) -> UserOut:
+        return user_out(user)
 
-    def _employee_period(name: str, employee_code: str, period: str) -> OperationResponse:
-        req = EmployeePeriodRequest(employee_code=employee_code, period=_period(period))
-        return run(name, employee_code=req.employee_code, period=req.period)
+    # ------------------------------------------------------------------ HR
 
-    @api.get("/employees/{employee_code}/attendance", tags=["employees"])
-    def attendance(employee_code: str, period: str = Query(..., examples=["2026-09"])):
-        return _employee_period("get_attendance", employee_code, period)
+    @app.get("/hr/employees", tags=["hr"], response_model=list[UserOut],
+             summary="All employees (HR only)")  # fmt: skip
+    def employees(_: Employee = Depends(require_hr),
+                  session: Session = Depends(get_session)) -> list[UserOut]:  # fmt: skip
+        rows = session.scalars(select(Employee).order_by(Employee.employee_code))
+        return [user_out(e) for e in rows]
 
-    @api.get("/employees/{employee_code}/salary-structure", tags=["employees"])
-    def salary_structure(employee_code: str, period: str = Query(..., examples=["2026-09"])):
-        return _employee_period("get_salary_structure", employee_code, period)
+    # ------------------------------------------------------------------ chat
 
-    @api.get("/employees/{employee_code}/payroll", tags=["employees"],
-             summary="Actual payslip from the payroll system")  # fmt: skip
-    def actual_payroll(employee_code: str, period: str = Query(..., examples=["2026-09"])):
-        result = _employee_period("get_payroll", employee_code, period)
-        if result.data.get("actual") is None:
-            raise HTTPException(status_code=404, detail=result.text)
-        return result
+    @app.post("/chat", tags=["chat"], response_model=ChatResponse)
+    def chat(body: ChatRequest, request: Request, user: Employee = Depends(current_user),
+             session: Session = Depends(get_session)) -> ChatResponse:  # fmt: skip
+        from payroll_copilot.services import chat_history
 
-    @api.get("/employees/{employee_code}/payslip", tags=["employees"],
-             summary="Expected payslip calculated by the engine")  # fmt: skip
-    def expected_payslip(employee_code: str, period: str = Query(..., examples=["2026-09"])):
-        return _employee_period("get_payslip", employee_code, period)
+        conversation_id = body.conversation_id or uuid4().hex[:16]
+        saved = chat_history.get(session, user, conversation_id)
+        ctx = ToolContext(session=session, user=user, today=app.state.today(),
+                          request_id=request.state.request_id,
+                          chat_context=dict(saved.context) if saved else {},
+                          history=chat_history.previous_turns(session, saved))  # fmt: skip
+        reply = chat_agent().ask(ctx, body.message, conversation_id)
+        chat = saved or chat_history.get_or_create(session, user, conversation_id, body.message)
+        chat_history.append(session, chat, body.message, reply.messages, reply.tools_used)
+        chat.context = ctx.chat_context
+        session.add_all(ctx.audit_rows)
+        audit.record(session, "chat.ask", actor=user, entity="conversation",
+                     entity_id=reply.conversation_id,
+                     new={"message": body.message[:300], "tools": reply.tools_used,
+                          "model": reply.model, "warnings": reply.warnings},
+                     request_id=request.state.request_id)  # fmt: skip
+        return ChatResponse(**reply.__dict__)
 
-    # ------------------------------------------------------------------ calculations
+    @app.delete("/chat/{conversation_id}", tags=["chat"], summary="Delete a conversation")
+    def forget(conversation_id: str, user: Employee = Depends(current_user),
+               session: Session = Depends(get_session)) -> dict[str, Any]:  # fmt: skip
+        from payroll_copilot.services import chat_history
 
-    def _calc(name: str) -> Callable[[EmployeePeriodRequest], OperationResponse]:
-        def endpoint(body: EmployeePeriodRequest) -> OperationResponse:
-            return run(name, employee_code=body.employee_code, period=body.period)
+        memory = chat_agent().store.clear(user.id, conversation_id)
+        saved = chat_history.remove(session, user, conversation_id)
+        return {"conversation_id": conversation_id, "cleared": memory or saved}
 
-        endpoint.__name__ = name
-        return endpoint
+    @app.get("/chat/sessions", tags=["chat"], summary="Your saved conversations")
+    def chat_sessions(user: Employee = Depends(current_user),
+                      session: Session = Depends(get_session)) -> list[dict[str, Any]]:  # fmt: skip
+        from payroll_copilot.services import chat_history
 
-    for path, name in (("salary", "calculate_salary"), ("pf", "calculate_pf"),
-                       ("esic", "calculate_esic"), ("pt", "calculate_pt"),
-                       ("arrear", "calculate_arrear"), ("payroll", "get_payslip"),
-                       ("pf-rules", "compare_pf_rules")):  # fmt: skip
-        api.add_api_route(f"/calculate/{path}", _calc(name), methods=["POST"],
-                          tags=["calculations"], response_model=OperationResponse)  # fmt: skip
+        return chat_history.list_sessions(session, user)
 
-    @api.post("/calculate/tds", tags=["calculations"])
-    def calculate_tds(body: TDSRequest) -> OperationResponse:
-        return run("calculate_tds", employee_code=body.employee_code, period=body.period,
-                   override_amount=body.override_amount, override_reason=body.override_reason)
+    @app.get("/chat/sessions/{conversation_id}", tags=["chat"],
+             summary="One saved conversation with its messages")
+    def chat_session(conversation_id: str, user: Employee = Depends(current_user),
+                     session: Session = Depends(get_session)) -> dict[str, Any]:  # fmt: skip
+        from payroll_copilot.services import chat_history
 
-    @api.post("/calculate/fnf", tags=["calculations"])
-    def calculate_fnf(body: EmployeeRequest) -> OperationResponse:
-        return run("calculate_fnf", employee_code=body.employee_code)
+        return chat_history.messages(session, user, conversation_id)
 
-    # ------------------------------------------------------------------ validation / QA
+    @app.get("/chat/tools", tags=["chat"], summary="Tools the assistant may use for you")
+    def my_tools(user: Employee = Depends(current_user)) -> list[dict[str, Any]]:
+        return [{"name": t.name, "description": t.description, "parameters": t.parameters}
+                for t in tools_for(user.role)]  # fmt: skip
 
-    @api.post("/validate/employee", tags=["validation"])
-    def validate_employee(body: EmployeePeriodRequest) -> OperationResponse:
-        return run("compare_expected_actual", employee_code=body.employee_code,
-                   period=body.period)  # fmt: skip
+    @app.get("/payslips/{period}", tags=["payslips"], summary="Your processed payslip")
+    def payslip(period: str, user: Employee = Depends(current_user),
+                session: Session = Depends(get_session)) -> dict[str, Any]:  # fmt: skip
+        run = PayrollRepository(session).get(user.id, parse_month(period))
+        if run is None:
+            raise NotFoundError(f"No processed payslip for {period}")
+        return run.payslip
 
-    @api.post("/validate/payroll", tags=["validation"],
-              summary="QA report for a payroll month (not saved)")  # fmt: skip
-    def validate_payroll(body: PeriodRequest) -> OperationResponse:
-        return run("run_payroll_qa", period=body.period)
+    @app.get("/payslips/{period}/pdf", tags=["payslips"], summary="Your payslip as PDF",
+             response_class=Response)  # fmt: skip
+    def payslip_pdf(period: str, request: Request, user: Employee = Depends(current_user),
+                    session: Session = Depends(get_session)) -> Response:  # fmt: skip
+        month = parse_month(period)
+        run = PayrollRepository(session).get(user.id, month)
+        if run is None:
+            raise NotFoundError(f"No processed payslip for {period}")
+        audit.record(session, "payslip.download", actor=user, entity="payroll_run",
+                     entity_id=run.id, request_id=request.state.request_id)  # fmt: skip
+        name = f"payslip_{user.employee_code}_{month}.pdf"
+        return Response(render_payslip_pdf(run.payslip), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
-    @api.get("/qa/runs", tags=["validation"], summary="Saved QA runs")
-    def qa_runs(limit: int = Query(20, ge=1, le=100)) -> list[dict[str, Any]]:
-        from payroll_copilot.services.qa_service import QAService
-
-        with ctx.sessions() as s:
-            return [{"id": r.id, "period": r.period, "status": r.status.value,
-                     "employees_checked": r.employees_checked, "findings": r.issues_found,
-                     "created_at": r.created_at.isoformat(), "summary": r.summary}
-                    for r in QAService(s).history(limit)]  # fmt: skip
-
-    @api.get("/qa/runs/{run_id}", tags=["validation"])
-    def qa_run(run_id: int) -> dict[str, Any]:
-        from payroll_copilot.services.qa_service import QAService
-
-        with ctx.sessions() as s:
-            run_row, issues = QAService(s).load(run_id)
-            return {
-                "id": run_row.id, "period": run_row.period, "summary": run_row.summary,
-                "issues": [{"component": i.component, "category": i.category,
-                            "status": i.status.value, "root_cause": i.root_cause,
-                            "expected": None if i.expected is None else str(i.expected),
-                            "actual": None if i.actual is None else str(i.actual),
-                            "difference": None if i.difference is None else str(i.difference),
-                            "primary": i.trace.get("primary", False)} for i in issues],
-            }  # fmt: skip
-
-    # ------------------------------------------------------------------ knowledge / chat
-
-    @api.post("/kb/search", tags=["knowledge"])
-    def kb_search(body: PolicySearchArgs) -> dict[str, Any]:
-        period = PayrollPeriod.parse(body.period) if body.period else None
-        chunks = ctx.kb.search(body.query, module=body.module, period=period, state=body.state,
-                               k=body.k)  # fmt: skip
-        return {"results": [{"citation": c.citation, "text": c.text, "score": round(c.score, 5),
-                             "metadata": c.metadata} for c in chunks]}  # fmt: skip
-
-    def copilot():
-        if app.state.copilot is None:
-            if copilot_factory is not None:
-                app.state.copilot = copilot_factory(ctx)
-            else:
-                from payroll_copilot.agent.copilot import PayrollCopilot
-
-                app.state.copilot = PayrollCopilot(ctx, use_configured_llm=settings.llm_enabled)
-        return app.state.copilot
-
-    def _thread(thread_id: str) -> str:
-        if not re.fullmatch(r"[\w.-]{1,100}", thread_id):
-            raise HTTPException(status_code=422, detail="invalid thread id")
-        return thread_id
-
-    @api.get("/chat/{thread_id}", tags=["chat"], summary="Stored conversation and memory")
-    def chat_history(thread_id: str) -> dict[str, Any]:
-        bot = copilot()
-        return {"thread_id": _thread(thread_id), "memory": bot.memory(thread_id),
-                "messages": bot.history(thread_id)}  # fmt: skip
-
-    @api.delete("/chat/{thread_id}", tags=["chat"], summary="Forget a conversation")
-    def chat_clear(thread_id: str) -> dict[str, Any]:
-        copilot().clear(_thread(thread_id))
-        return {"thread_id": thread_id, "cleared": True}
-
-    # ------------------------------------------------------------------ approvals
-
-    def _approvals(session) -> ApprovalService:
-        return ApprovalService(session, settings.approvers)
-
-    def _user(x_user: str | None, x_user_token: str | None) -> str:
-        if not x_user or not _USER.match(x_user):
-            raise HTTPException(status_code=401, detail="X-User header required for approvals")
-        if not verified(x_user, x_user_token):
-            raise HTTPException(status_code=401, detail="Missing or invalid X-User-Token")
-        return x_user
-
-    @api.post("/approvals", tags=["approvals"], status_code=201,
-              summary="Request a write action (needs another user's approval)")  # fmt: skip
-    def request_approval(
-        body: ApprovalRequest, x_user: str | None = Header(default=None),
-        x_user_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user, x_user_token)
-        with ctx.write_sessions() as s:
-            view = _approvals(s).request(body.action_type, body.payload,
-                                              requested_by=f"api:{user}", reason=body.reason)
-        return view.model_dump()
-
-    @api.get("/approvals", tags=["approvals"])
-    def list_approvals(status: str | None = None,
-                       limit: int = Query(50, ge=1, le=200)) -> list[dict[str, Any]]:  # fmt: skip
-        with ctx.sessions() as s:
-            return [v.model_dump() for v in _approvals(s).list(status, limit)]
-
-    @api.get("/approvals/{approval_id}", tags=["approvals"])
-    def get_approval(approval_id: int) -> dict[str, Any]:
-        with ctx.sessions() as s:
-            return _approvals(s).get(approval_id).model_dump()
-
-    @api.post("/approvals/{approval_id}/approve", tags=["approvals"])
-    def approve(approval_id: int, body: ApprovalDecision,
-                x_user: str | None = Header(default=None),
-                x_user_token: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user, x_user_token)
-        with ctx.write_sessions() as s:
-            return _approvals(s).approve(approval_id, user, body.comment).model_dump()
-
-    @api.post("/approvals/{approval_id}/reject", tags=["approvals"])
-    def reject(approval_id: int, body: ApprovalDecision,
-               x_user: str | None = Header(default=None),
-               x_user_token: str | None = Header(default=None)) -> dict[str, Any]:  # fmt: skip
-        user = _user(x_user, x_user_token)
-        with ctx.write_sessions() as s:
-            return _approvals(s).reject(approval_id, user, body.comment or "").model_dump()
-
-    @api.get("/audit", tags=["audit"], summary="Audit trail (newest first)")
-    def audit(action: str | None = None, entity_id: str | None = None,
-              request_id: str | None = None,
-              limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:  # fmt: skip
-        return ctx.audit.search(action=action, entity_id=entity_id, request_id=request_id,
-                                limit=limit)  # fmt: skip
-
-    @api.post("/chat", tags=["chat"])
-    def chat(body: ChatRequest) -> dict[str, Any]:
-        reply = copilot().ask(body.message, thread_id=body.thread_id)
-        return {"answer": reply.answer, "intent": reply.intent, "route": reply.route,
-                "entities": reply.entities, "tools_used": reply.tools_used,
-                "artifacts": reply.artifacts, "sources": reply.sources,
-                "warnings": reply.warnings, "checks": reply.checks, "used_llm": reply.used_llm,
-                "request_id": reply.request_id, "pending_action": reply.pending_action}
-
-    @api.get("/tools", tags=["chat"], summary="Tools available to the agent")
-    def list_tools() -> list[dict[str, Any]]:
-        return [{"name": t.name, "access": t.metadata["access"], "description": t.description,
-                 "args": list(t.args)} for t in build_tools(ctx)]  # fmt: skip
-
-    app.include_router(api)
+    app.include_router(batch_router)
+    app.include_router(runs_router)
+    app.include_router(directory_router)
+    app.include_router(overview_router)
+    app.include_router(payroll_router)
+    app.include_router(actions_router)
+    app.include_router(audits_router)
+    app.include_router(knowledge_router)
+    app.include_router(settings_router)
+    app.include_router(reports_router)
+    app.include_router(leaves_router)
     return app

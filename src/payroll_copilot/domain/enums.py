@@ -67,15 +67,6 @@ class LopAllocation(StrEnum):
     PROPORTIONAL = "PROPORTIONAL"  # in proportion to each segment's payable days
 
 
-class PayrollRunStatus(StrEnum):
-    DRAFT = "DRAFT"
-    PROCESSED = "PROCESSED"
-    LOCKED = "LOCKED"
-
-
-class PayrollSource(StrEnum):
-    ACTUAL = "ACTUAL"  # produced by the payroll system under test
-    IMPORTED = "IMPORTED"  # uploaded from a file
 
 
 class RuleType(StrEnum):
@@ -112,33 +103,8 @@ class CeilingProration(StrEnum):
     PAID_DAYS = "PAID_DAYS"  # ceiling × paid_days / basis_days
 
 
-class ArrearStatus(StrEnum):
-    PENDING = "PENDING"
-    PROCESSED = "PROCESSED"
-    CANCELLED = "CANCELLED"
 
 
-class FnFStatus(StrEnum):
-    PENDING = "PENDING"
-    PROCESSED = "PROCESSED"
-    PAID = "PAID"
-
-
-class ApprovalStatus(StrEnum):
-    PENDING = "PENDING"
-    APPROVED = "APPROVED"  # transient: approved, being executed
-    REJECTED = "REJECTED"
-    EXECUTED = "EXECUTED"
-    FAILED = "FAILED"  # approved but execution failed (nothing changed)
-
-
-class ActionType(StrEnum):
-    """Write actions that need human approval."""
-
-    TDS_OVERRIDE = "TDS_OVERRIDE"
-    ATTENDANCE_CORRECTION = "ATTENDANCE_CORRECTION"
-    SAVE_QA_RUN = "SAVE_QA_RUN"
-    VERIFY_RULE = "VERIFY_RULE"
 
 
 class ComparisonStatus(StrEnum):
@@ -149,7 +115,65 @@ class ComparisonStatus(StrEnum):
     MISSING_EXPECTED = "MISSING_EXPECTED"
 
 
-class QARunStatus(StrEnum):
+# ---------------------------------------------------------------------- chatbot
+
+
+class Role(StrEnum):
+    EMPLOYEE = "employee"
+    MANAGER = "manager"  # sees own team's profiles, never amounts
+    HR = "hr"  # full payroll access (same as ADMIN; kept for existing users)
+    # payroll staff roles (permissions in auth/permissions.py)
+    ADMIN = "admin"
+    PAYROLL_MANAGER = "payroll_manager"
+    PAYROLL_EXECUTIVE = "payroll_executive"
+    VIEWER = "viewer"
+
+
+class AttendanceStatus(StrEnum):
+    """One employee-day. ABSENT without an approved leave is an attendance exception."""
+
+    PRESENT = "PRESENT"
+    ABSENT = "ABSENT"
+    LEAVE = "LEAVE"  # covered by an approved leave
+    HALF_DAY = "HALF_DAY"
+    WEEK_OFF = "WEEK_OFF"
+    HOLIDAY = "HOLIDAY"
+
+
+class LeaveType(StrEnum):
+    CL = "CL"  # casual
+    SL = "SL"  # sick
+    EL = "EL"  # earned / privilege
+    LOP = "LOP"  # leave without pay
+
+
+class LeaveStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
+
+
+class PayrollRunStatus(StrEnum):
+    PROCESSED = "PROCESSED"
+    LOCKED = "LOCKED"  # paid out; changes need a new run
+
+
+class BatchStatus(StrEnum):
+    REVIEW = "REVIEW"  # HR is reviewing LOP; nothing processed yet
+    QUEUED = "QUEUED"  # HR pressed run; waiting for the worker
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
+    COMPLETED_WITH_ERRORS = "COMPLETED_WITH_ERRORS"
+    CANCELLED = "CANCELLED"
+
+
+FINISHED_BATCH = frozenset({BatchStatus.COMPLETED, BatchStatus.COMPLETED_WITH_ERRORS,
+                            BatchStatus.CANCELLED})  # fmt: skip
+
+
+class BatchItemStatus(StrEnum):
+    PENDING = "PENDING"
+    DONE = "DONE"  # payroll processed by this batch
+    SKIPPED = "SKIPPED"  # already processed for the month before (idempotent)
     FAILED = "FAILED"

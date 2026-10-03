@@ -1,51 +1,50 @@
-"""API request/response models. Money is always serialised as a string."""
+"""Request / response models of the API."""
 
+from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
-
-from payroll_copilot.tools.schemas import EmployeeArgs, EmployeePeriodArgs, PeriodArgs, TDSArgs
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class EmployeePeriodRequest(EmployeePeriodArgs):
-    pass
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def _normalise(cls, value: str) -> str:
+        return value.strip().lower()
 
 
-class EmployeeRequest(EmployeeArgs):
-    pass
+class UserOut(BaseModel):
+    employee_id: int
+    employee_code: str
+    full_name: str
+    email: str
+    role: str
+    department: str | None
+    designation: str | None
 
 
-class PeriodRequest(PeriodArgs):
-    pass
-
-
-class TDSRequest(TDSArgs):
-    pass
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    user: UserOut
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(min_length=1, max_length=2000)
-    thread_id: str = Field(default="api", min_length=1, max_length=100, pattern=r"^[\w.-]+$")
+    conversation_id: str | None = Field(default=None, pattern=r"^[\w-]{4,64}$")
 
 
-class ApprovalRequest(BaseModel):
-    action_type: str = Field(description="TDS_OVERRIDE | ATTENDANCE_CORRECTION | SAVE_QA_RUN | "
-                             "VERIFY_RULE")  # fmt: skip
-    payload: dict[str, Any]
-    reason: str | None = Field(default=None, max_length=500)
-
-
-class ApprovalDecision(BaseModel):
-    comment: str | None = Field(default=None, max_length=1000)
-
-
-class OperationResponse(BaseModel):
-    """Result of an engine operation: readable text + structured data with traces."""
-
-    text: str
-    data: dict[str, Any]
-
-
-class ErrorResponse(BaseModel):
-    error: str
-    detail: str
+class ChatResponse(BaseModel):
+    conversation_id: str
+    messages: list[dict[str, Any]]  # each has "type": text | payslip_card | ...
+    tools_used: list[str]
+    model: str | None
+    warnings: list[str]

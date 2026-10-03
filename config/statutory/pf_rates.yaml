@@ -1,0 +1,32 @@
+# Statutory PF rates, effective-dated. Loaded into the statutory_rates table.
+# Every rate row may carry its own wage ceiling. The PF engine reads the rows in force on
+# each date of a payroll month and splits the month wherever any row changes, so a future
+# revision is a new row here - never a code change.
+#
+# Rates are percentages. VERIFIED rows are immutable: correct them with a new row.
+
+rule_family: PF
+sources:
+  ceiling_2014: "Ceiling ₹15,000 w.e.f. 01-09-2014 (EPF Scheme 1952 / EPS 1995 amendments)"
+  so_5109e: "Gazette S.O. 5109(E) dated 17-09-2026 (Code on Social Security, 2020, Chapter III): ceiling ₹25,000 w.e.f. 17-09-2026; Cabinet decision 16-09-2026 (PIB release 2310973); EPFO FAQ on revision of wage ceiling (Q5, Q7, Q9, Q13)"
+  admin_2018: "EPF administrative charges 0.50% w.e.f. 01-06-2018, minimum ₹500 per establishment (₹75 with no contributing member); EPFO present rates of contribution"
+  edli_admin_2017: "EDLI administrative charges waived w.e.f. 01-04-2017"
+
+rates:
+  # ---------------------------------------------------------- up to 16-09-2026 (EPF v1)
+  - {rate_name: EE_PF,     rule_version: EPF v1, rate_value: 12,   wage_ceiling: 15000, effective_from: 2014-09-01, effective_to: 2026-09-16, source: ceiling_2014, status: VERIFIED}
+  - {rate_name: ER_PF,     rule_version: EPF v1, rate_value: 12,   wage_ceiling: 15000, effective_from: 2014-09-01, effective_to: 2026-09-16, source: ceiling_2014, status: VERIFIED}
+  - {rate_name: EPS,       rule_version: EPF v1, rate_value: 8.33, wage_ceiling: 15000, effective_from: 2014-09-01, effective_to: 2026-09-16, source: ceiling_2014, status: VERIFIED}
+  - {rate_name: EDLI,      rule_version: EPF v1, rate_value: 0.5,  wage_ceiling: 15000, effective_from: 2014-09-01, effective_to: 2026-09-16, source: ceiling_2014, status: VERIFIED}
+  - {rate_name: EPF_ADMIN, rule_version: EPF v1, rate_value: 0.5,  wage_ceiling: null,  effective_from: 2018-06-01, effective_to: 2026-09-16, source: admin_2018, status: VERIFIED}
+  # ---------------------------------------------------------- from 17-09-2026 (EPF v2)
+  - {rate_name: EE_PF,     rule_version: EPF v2, rate_value: 12,   wage_ceiling: 25000, effective_from: 2026-09-17, effective_to: null, source: so_5109e, status: VERIFIED}
+  - {rate_name: ER_PF,     rule_version: EPF v2, rate_value: 12,   wage_ceiling: 25000, effective_from: 2026-09-17, effective_to: null, source: so_5109e, status: VERIFIED}
+  - {rate_name: EPS,       rule_version: EPF v2, rate_value: 8.33, wage_ceiling: 25000, effective_from: 2026-09-17, effective_to: null, source: so_5109e, status: VERIFIED}
+  - {rate_name: EDLI,      rule_version: EPF v2, rate_value: 0.5,  wage_ceiling: 25000, effective_from: 2026-09-17, effective_to: null, source: so_5109e, status: VERIFIED}
+  - {rate_name: EPF_ADMIN, rule_version: EPF v2, rate_value: 0.5,  wage_ceiling: null,  effective_from: 2026-09-17, effective_to: null, source: so_5109e, status: VERIFIED}
+  # ---------------------------------------------------------- not tied to the ceiling
+  - {rate_name: EDLI_ADMIN,              rule_version: EPF, rate_value: 0,   wage_ceiling: null, effective_from: 2017-04-01, effective_to: null, source: edli_admin_2017, status: VERIFIED}
+  - {rate_name: EPF_ADMIN_MIN,           rule_version: EPF, rate_value: 500, wage_ceiling: null, effective_from: 2018-06-01, effective_to: null, source: admin_2018, status: VERIFIED}
+  - {rate_name: EPF_ADMIN_MIN_NO_MEMBER, rule_version: EPF, rate_value: 75,  wage_ceiling: null, effective_from: 2018-06-01, effective_to: null, source: admin_2018, status: VERIFIED}
+  - {rate_name: EPS_MAX_AGE,             rule_version: EPF, rate_value: 58,  wage_ceiling: null, effective_from: 2014-09-01, effective_to: null, source: ceiling_2014, status: VERIFIED}

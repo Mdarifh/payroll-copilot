@@ -157,10 +157,11 @@ class TestRepoRuleFiles:
         for path in (RULES_DIR / "pt").glob("*.yaml"):
             assert read_yaml(path)["state_code"] == path.stem
 
-    def test_new_pf_rule_is_25000_from_sep_2026(self):
+    def test_new_pf_rule_is_25000_from_17_sep_2026(self):
         epf = next(f for f in load_rule_files(RULES_DIR) if f.rule_code == "EPF")
         new = epf.versions[-1]
-        assert str(new.effective_from) == "2026-09-01"
+        assert str(new.effective_from) == "2026-09-17"  # S.O. 5109(E)
+        assert str(epf.versions[-2].effective_to) == "2026-09-16"
         assert new.pf_wage_ceiling == Decimal("25000")
         assert epf.versions[-2].pf_wage_ceiling == Decimal("15000")
 

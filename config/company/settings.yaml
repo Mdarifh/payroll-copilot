@@ -1,0 +1,12 @@
+# Company payroll configuration (loaded into company_settings; HR changes it in the app,
+# each change effective from a date and audited). Values decided in the approved plan.
+effective_from: 2014-09-01
+settings:
+  pf_wage_policy: statutory_ceiling   # statutory_ceiling | actual_wages (employee may override)
+  pf_wage_basis: BASIC_DA             # BASIC_DA | STATUTORY_WAGES (s.2(88) with 50% add-back)
+  pf_ceiling_scope: RULE_PERIOD       # RULE_PERIOD | SEGMENT
+  pf_proration_divisor: CALENDAR      # CALENDAR | FIXED_30
+  edli_wage_basis: PF_WAGE            # PF_WAGE (EPFO FAQ Q7) | CAPPED
+  pf_segment_engine: true             # false = old single-rule PF (rollback switch)
+  payroll_second_approver: true       # finalize must be approved by another HR user
+  change_approval: true               # LOP / overtime / one-off / salary changes need a second HR user

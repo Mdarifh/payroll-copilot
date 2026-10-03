@@ -5,6 +5,8 @@ Secrets are ``SecretStr`` so they never appear in ``repr()``, logs or
 so the app behaves the same regardless of the current working directory.
 """
 
+import logging
+import secrets
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
@@ -22,20 +24,30 @@ from payroll_copilot.domain.enums import LopAllocation, PaidDaysBasis
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 _SQLITE_PREFIX = "sqlite:///"
+_MIN_JWT_SECRET = 32
+
+log = logging.getLogger(__name__)
 
 
 class LLMProvider(StrEnum):
     NONE = "none"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    AZURE_OPENAI = "azure_openai"
-    OLLAMA = "ollama"
+    OLLAMA = "ollama"  # free, local
+    ANTHROPIC = "anthropic"  # Claude API (needs ANTHROPIC_API_KEY, paid per use)
 
 
-class EmbeddingProvider(StrEnum):
-    LOCAL = "local"
-    OPENAI = "openai"
-    OLLAMA = "ollama"
+class LopDivisor(StrEnum):
+    """Days one month's pay is divided by to get the LOP per-day rate."""
+
+    FIXED_30 = "FIXED_30"
+    CALENDAR = "CALENDAR"  # days in the month
+    WORKING_DAYS = "WORKING_DAYS"  # month days minus week offs and holidays
+
+
+class LopBase(StrEnum):
+    """Which monthly amount the LOP per-day rate is taken from."""
+
+    GROSS = "GROSS"
+    BASIC = "BASIC"
 
 
 class Settings(BaseSettings):
@@ -47,75 +59,64 @@ class Settings(BaseSettings):
     )
 
     # ---------- App ----------
-    app_name: str = "AI Payroll Copilot"
+    app_name: str = "Payroll Chatbot"
     app_env: Literal["dev", "test", "prod"] = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
 
+    # ---------- Company ----------
+    company_name: str = "Demo Tech Pvt Ltd"
+    company_state: str = "MH"
+
     # ---------- Database ----------
-    database_url: str = f"{_SQLITE_PREFIX}./data/payroll.db"
+    # SQLite for now; PostgreSQL later (postgresql+psycopg://user:pass@host:5432/payroll)
+    database_url: str = f"{_SQLITE_PREFIX}./data/chatbot.db"
 
-    # ---------- LLM ----------
-    llm_provider: LLMProvider = LLMProvider.NONE
-    llm_model: str | None = None
-    llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    openai_api_key: SecretStr | None = None
-    anthropic_api_key: SecretStr | None = None
-    azure_openai_api_key: SecretStr | None = None
-    azure_openai_endpoint: str | None = None
-    azure_openai_api_version: str | None = None
+    # ---------- Auth ----------
+    # HS256 signing key for login tokens. Required in prod; in dev a random key is
+    # generated per process (everyone is logged out when the API restarts).
+    jwt_secret: SecretStr | None = None
+    jwt_expire_minutes: int = Field(default=480, ge=5, le=7 * 24 * 60)
+
+    # ---------- LLM (chooses tools and words the answer; never calculates) ----------
+    llm_provider: LLMProvider = LLMProvider.OLLAMA
+    llm_max_steps: int = Field(default=6, ge=1, le=12)  # model calls per chat message
+    ollama_model: str = "qwen2.5:7b"
     ollama_base_url: str = "http://localhost:11434"
-
-    # ---------- RAG ----------
-    embedding_provider: EmbeddingProvider = EmbeddingProvider.LOCAL
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    knowledge_base_dir: Path = Path("./knowledge_base")
-    vector_store_dir: Path = Path("./data/chroma")
-
-    # ---------- Rules ----------
-    rules_dir: Path = Path("./config/rules")
-    allow_unverified_rules: bool = True
-
-    # ---------- Payroll defaults ----------
-    default_paid_days_basis: PaidDaysBasis = PaidDaysBasis.CALENDAR
-    default_rounding_mode: RoundingMode = RoundingMode.HALF_UP
-    default_lop_allocation: LopAllocation = LopAllocation.LAST_SEGMENT
-
-    # ---------- F&F (company policy, not statutory) ----------
-    # Heads whose full-month amount forms the per-day rate; "GROSS" = all gross earnings.
-    fnf_leave_encashment_heads: list[str] = ["BASIC"]
-    fnf_leave_encashment_divisor: Decimal = Field(default=Decimal(30), gt=0)
-    fnf_notice_recovery_heads: list[str] = ["GROSS"]
-    fnf_notice_recovery_divisor: Decimal = Field(default=Decimal(30), gt=0)
-    comparison_tolerance: Decimal = Field(default=Decimal("0"), ge=0)
+    ollama_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-sonnet-5"
 
     # ---------- API ----------
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
-    api_key: SecretStr | None = None
-    api_base_url: str = "http://127.0.0.1:8000"
+    # comma separated origins allowed to call the API from a browser (React dev server)
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
-    # ---------- Agent memory / audit ----------
-    checkpoint_db: Path = Path("./data/checkpoints.db")
-    audit_enabled: bool = True
+    # ---------- Rules ----------
+    rules_dir: Path = Path("./config/rules")
+    salary_heads_file: Path = Path("./config/payroll/salary_structures.yaml")
+    allow_unverified_rules: bool = True
 
-    # ---------- Approvals ----------
-    # Users allowed to approve write actions; empty => nobody can approve (safe default).
-    approvers: list[str] = []
-    # API user -> personal token. When set, X-User counts only with a matching X-User-Token,
-    # so nobody can act (or approve) as someone else just by sending their name.
-    user_tokens: dict[str, SecretStr] = {}
+    # ---------- Payroll policy (company-specific, never decided by the LLM) ----------
+    default_paid_days_basis: PaidDaysBasis = PaidDaysBasis.CALENDAR
+    default_rounding_mode: RoundingMode = RoundingMode.HALF_UP
+    default_lop_allocation: LopAllocation = LopAllocation.LAST_SEGMENT
+    # LOP per day = (GROSS | BASIC) / (30 | calendar days | working days)
+    lop_divisor: LopDivisor = LopDivisor.CALENDAR
+    lop_base: LopBase = LopBase.GROSS
+    # ---------- Bulk payroll (batches) ----------
+    batch_page_size: int = Field(default=100, ge=10, le=1000)  # employees read per page
+    batch_source_rate: float = Field(default=20.0, gt=0)  # payroll-source calls per second
+    batch_chunk_size: int = Field(default=50, ge=1, le=1000)  # employees per worker chunk
+    batch_max_attempts: int = Field(default=3, ge=1, le=10)  # retries for temporary errors
+    batch_worker_enabled: bool = True  # background worker inside the API process
+    # yearly leave entitlement per leave type (days)
+    leave_entitlements: dict[str, Decimal] = {
+        "CL": Decimal(12), "SL": Decimal(12), "EL": Decimal(18),
+    }  # fmt: skip
 
-    @field_validator(
-        "llm_model",
-        "openai_api_key",
-        "anthropic_api_key",
-        "azure_openai_api_key",
-        "azure_openai_endpoint",
-        "azure_openai_api_version",
-        "api_key",
-        mode="before",
-    )
+    @field_validator("jwt_secret", "anthropic_api_key", mode="before")
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
         # ".env.example" style empty assignments (KEY=) mean "not set".
@@ -123,7 +124,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("knowledge_base_dir", "vector_store_dir", "rules_dir", "checkpoint_db")
+    @field_validator("rules_dir", "salary_heads_file")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else (PROJECT_ROOT / value).resolve()
@@ -142,10 +143,8 @@ class Settings(BaseSettings):
     def _prod_requires_complete_config(self) -> "Settings":
         if self.app_env == "prod":
             problems = self.config_issues()
-            if self.api_key is None:
-                problems.append("API_KEY must be set in prod")
-            if self.approvers and not self.user_tokens:
-                problems.append("USER_TOKENS must be set in prod when APPROVERS is set")
+            if self.jwt_secret is None:
+                problems.append("JWT_SECRET must be set in prod")
             if problems:
                 raise ConfigurationError("; ".join(problems))
         return self
@@ -160,39 +159,39 @@ class Settings(BaseSettings):
     def llm_enabled(self) -> bool:
         return self.llm_provider is not LLMProvider.NONE
 
-    def config_issues(self) -> list[str]:
-        """Human-readable problems that would stop a feature from working.
+    @property
+    def llm_model(self) -> str | None:
+        return {LLMProvider.OLLAMA: self.ollama_model,
+                LLMProvider.ANTHROPIC: self.anthropic_model}.get(self.llm_provider)  # fmt: skip
 
-        Not raised in dev so that deterministic payroll features work without an
-        LLM key; the agent layer checks this before starting.
-        """
+    def config_issues(self) -> list[str]:
+        """Human-readable problems that would stop a feature from working."""
         issues: list[str] = []
-        provider = self.llm_provider
-        if provider is LLMProvider.OPENAI and self.openai_api_key is None:
-            issues.append("LLM_PROVIDER=openai but OPENAI_API_KEY is not set")
-        if provider is LLMProvider.ANTHROPIC and self.anthropic_api_key is None:
+        if self.llm_provider is LLMProvider.ANTHROPIC and self.anthropic_api_key is None:
             issues.append("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")
-        if provider is LLMProvider.AZURE_OPENAI:
-            if self.azure_openai_api_key is None:
-                issues.append("LLM_PROVIDER=azure_openai but AZURE_OPENAI_API_KEY is not set")
-            if not self.azure_openai_endpoint:
-                issues.append("LLM_PROVIDER=azure_openai but AZURE_OPENAI_ENDPOINT is not set")
-        if self.llm_enabled and not self.llm_model:
-            issues.append(f"LLM_PROVIDER={provider.value} but LLM_MODEL is not set")
-        if self.embedding_provider is EmbeddingProvider.OPENAI and self.openai_api_key is None:
-            issues.append("EMBEDDING_PROVIDER=openai but OPENAI_API_KEY is not set")
+        secret = self.jwt_secret
+        if secret is not None and len(secret.get_secret_value()) < _MIN_JWT_SECRET:
+            issues.append(f"JWT_SECRET must be at least {_MIN_JWT_SECRET} characters")
+        return issues + self.lop_issues()
+
+    def lop_issues(self) -> list[str]:
+        """LOP shown to HR must equal what payroll deducts, so the policy must match the
+        engine: it prorates all gross heads by paid days on DEFAULT_PAID_DAYS_BASIS."""
+        issues = []
+        if self.lop_base is not LopBase.GROSS:
+            issues.append("LOP_BASE=BASIC is not supported by the payroll engine yet "
+                          "(it prorates all gross heads); use LOP_BASE=GROSS")  # fmt: skip
+        expected = PaidDaysBasis(self.lop_divisor.value)  # same names on both enums
+        if self.default_paid_days_basis is not expected:
+            issues.append(f"LOP_DIVISOR={self.lop_divisor.value} needs "
+                          f"DEFAULT_PAID_DAYS_BASIS={expected.value} (now "
+                          f"{self.default_paid_days_basis.value})")  # fmt: skip
         return issues
 
     def secret_values(self) -> list[str]:
         """Raw secret strings, used by the logging redaction filter."""
-        secrets = [
-            self.openai_api_key,
-            self.anthropic_api_key,
-            self.azure_openai_api_key,
-            self.api_key,
-            *self.user_tokens.values(),
-        ]
-        return [s.get_secret_value() for s in secrets if s is not None and s.get_secret_value()]
+        values = [self.jwt_secret, self.anthropic_api_key]
+        return [s.get_secret_value() for s in values if s is not None and s.get_secret_value()]
 
     def summary(self) -> dict[str, str]:
         """Safe, printable view of the configuration (secrets masked)."""
@@ -201,8 +200,6 @@ class Settings(BaseSettings):
             value = getattr(self, name)
             if isinstance(value, SecretStr):
                 shown = "****" + value.get_secret_value()[-4:] if value.get_secret_value() else ""
-            elif name == "user_tokens":
-                shown = f"tokens for {sorted(value)}" if value else "<not set>"
             elif value is None:
                 shown = "<not set>"
             else:
@@ -228,3 +225,13 @@ def _mask_db_password(url: str) -> str:
 def get_settings() -> Settings:
     """Process-wide settings singleton. Tests call ``get_settings.cache_clear()``."""
     return Settings()
+
+
+@lru_cache
+def jwt_signing_key() -> str:
+    """JWT_SECRET, or (dev/test only) a random key that lives as long as the process."""
+    settings = get_settings()
+    if settings.jwt_secret is not None:
+        return settings.jwt_secret.get_secret_value()
+    log.warning("JWT_SECRET not set: using a random key; logins end when the API restarts")
+    return secrets.token_urlsafe(48)

@@ -7,7 +7,7 @@ versions:
   - version: 1
     name: EPF ₹15,000 wage ceiling (admin 0.50%)
     effective_from: 2018-06-01
-    effective_to: 2026-08-31
+    effective_to: 2026-09-16
     status: UNVERIFIED
     source_ref: "EPF Scheme 1952 / EPS 1995 (ceiling ₹15,000 w.e.f. 01-09-2014); admin charge 0.50% w.e.f. 01-06-2018"
     applicability:
@@ -26,15 +26,15 @@ versions:
     rounding_mode: HALF_UP
 
   - version: 2
-    name: EPF ₹25,000 wage ceiling (September 2026)
-    effective_from: 2026-09-01
+    name: EPF ₹25,000 wage ceiling (S.O. 5109(E))
+    effective_from: 2026-09-17
     effective_to: null
     status: UNVERIFIED
-    source_ref: "Sept-2026 PF wage ceiling revision to ₹25,000 (as instructed by user) - attach notification"
+    source_ref: "Gazette S.O. 5109(E) dated 17-09-2026; EPFO FAQ on revision of wage ceiling"
     notes: >-
-      EPS and EDLI ceilings assumed to move to ₹25,000 along with the PF wage ceiling.
-      Confirm from the official notification; if EPS stays at ₹15,000 change
-      eps_wage_ceiling here (while UNVERIFIED) or add version 3.
+      Effective 17-09-2026 (not 01-09). EPF, EPS and EDLI ceilings all ₹25,000 (EPFO FAQ Q5,
+      Q13). September 2026 is split 1-16 / 17-30; the segment engine reads
+      config/statutory/pf_rates.yaml for that; this file feeds the legacy path.
     applicability:
       - {field: pf_applicable, op: eq, value: true}
     employee_rate: 12

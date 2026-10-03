@@ -1,0 +1,27 @@
+# Overtime policy (company configuration). HR must confirm these values before go-live.
+#
+# Rate per hour, in this order:
+#   1. employee override  employees.ot_rate_per_hour (agreed rate for that employee)
+#   2. this policy        method below
+# The AI never decides a rate: if neither gives one, overtime cannot be added.
+#
+# MULTIPLE_OF_HOURLY:  hourly = Σ full-month amount of rate_heads ÷ days_divisor ÷ hours_per_day
+#                      rate   = hourly × multiplier
+#   Factories Act 1948 s.59: overtime at twice the ordinary rate of wages. "Ordinary rate"
+#   heads are a company decision - BASIC only here; add DA etc. if the company pays it.
+# FIXED_RATE:          rate = fixed_rate_per_hour for everyone
+overtime:
+  version: 1
+  effective_from: 2026-04-01
+  enabled: true
+  method: MULTIPLE_OF_HOURLY
+  rate_heads: [BASIC]
+  days_divisor: 26
+  hours_per_day: 8
+  multiplier: 2
+  fixed_rate_per_hour: null
+  # company limits (an entry outside them is refused); check the state Factories rules
+  max_hours_per_day: 8
+  max_hours_per_month: 50
+  # employee_category values that may get overtime; empty list = everyone
+  eligible_categories: []

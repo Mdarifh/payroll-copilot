@@ -1,351 +1,272 @@
-# AI Payroll Copilot
+# Payroll Chatbot
 
-AI-powered payroll assistant: a deterministic, versioned-rule payroll calculation
-engine with a LangChain/LangGraph copilot on top. The LLM never computes payroll
-numbers; it only understands questions, picks tools and explains calculation traces.
+A payroll chatbot for an Indian company. Employees and HR ask payroll questions and
+perform payroll actions through chat. An LLM - free local **Ollama** or **Claude**
+(Anthropic API), switchable in `.env` - chooses **tools**; every number comes from the
+deterministic payroll engine in Python, never from the LLM.
 
-> Status: **Phase 19 done - human approval (maker-checker) for every write action.**
+> **Status: Phase 3 of 5 done** - React chat screen with login, cards and quick actions.
 >
-> Data: everything runs on the local SQLite DB `data/payroll.db` with demo seed data.
-> The project does not connect to any Zimyo system, database or API.
+> Data: local SQLite `data/chatbot.db` with fictional demo data only.
+> The previous "AI Payroll Copilot" (Streamlit + QA agent) is kept on the git branch
+> `legacy/payroll-copilot`.
 
-## Setup
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Database schema + seed data + login | ✅ done |
+| 2 | Chat backend with LLM tool calling (read-only tools) | ✅ done |
+| 3 | React + Tailwind chat UI with cards | ✅ done |
+| 4 | Action tools with confirmation, LOP flow, audit log | next |
+| 5 | RAG over policy documents | |
 
-Requires [uv](https://docs.astral.sh/uv/) (Python 3.12 is installed automatically).
+## Open the app (easiest)
+
+Double-click **`Start Payroll Chatbot.bat`** in the project folder. It starts Ollama (if
+needed), the API and the chat screen in their own windows, then opens
+**http://127.0.0.1:5173**. Keep the "Payroll API" and "Payroll Chat UI" windows open.
+Sign in with a demo login (click one under "Demo logins" to fill the form).
+
+The first answer can take up to a minute while the model loads into memory.
+
+## Setup (Windows PowerShell)
+
+Requires [uv](https://docs.astral.sh/uv/) (installs Python 3.12 automatically).
 
 ```powershell
-uv sync                      # create .venv and install dependencies
-copy .env.example .env       # then fill values (never commit .env)
+cd "D:\Payroll QA Agent"
+uv sync                          # create .venv and install dependencies
+copy .env.example .env           # then set JWT_SECRET (see below)
 .\.venv\Scripts\Activate.ps1
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste as JWT_SECRET in .env
 ```
 
-LLM (from Phase 13): free local model via [Ollama](https://ollama.com) -
-`ollama pull qwen2.5:7b`.
-
-## Run
+## Run Phase 1
 
 ```powershell
-payroll-copilot check-config                 # resolved config (secrets masked)
-payroll-copilot db seed                      # migrate + load rules + demo data (idempotent)
-payroll-copilot db status                    # row count per table
-payroll-copilot db reset --yes               # delete dev SQLite DB and seed again
-payroll-copilot rules load                   # validate config/rules/** and sync to DB
-payroll-copilot rules resolve PF --period 2026-09 --employee ARIF-112
-payroll-copilot salary show ARIF-112 --period 2026-09     # structure + applicable compliance
-payroll-copilot salary breakup --structure STD-2026 --gross 33333
-payroll-copilot salary calc EMP-010 --period 2026-09 --trace       # prorated earnings
-payroll-copilot pf calc ARIF-112 --period 2026-09 --trace          # PF components + trace
-payroll-copilot pf compare ARIF-112 --period 2026-09               # old vs new PF rule
-payroll-copilot esic calc EMP-008 --period 2026-09 --trace         # ESIC coverage + shares
-payroll-copilot pt calc EMP-004 --period 2026-09 --trace           # PT (TN half-yearly)
-payroll-copilot lwf calc EMP-009 --period 2026-09                  # LWF (HR monthly %)
-payroll-copilot tds calc EMP-009 --period 2026-09 --trace          # projected tax + monthly TDS
-payroll-copilot tds calc EMP-009 --period 2026-09 --override 3000 --reason "what-if"
-payroll-copilot arrear calc EMP-004 --period 2026-09               # arrears + month-wise PF
-payroll-copilot fnf calc EMP-006                                   # full & final settlement
-payroll-copilot payroll calc ARIF-112 --period 2026-09             # full expected payslip
-payroll-copilot db seed-actual                                     # demo ACTUAL run (with errors)
-payroll-copilot validate payroll --period 2026-09                  # QA summary for the run
-payroll-copilot validate employee EMP-002 --period 2026-09 [--all] # expected vs actual + causes
-payroll-copilot kb ingest --generate --rebuild                     # rule docs + vector store
-payroll-copilot kb search "PF wage ceiling" --module pf --period 2026-08
-payroll-copilot kb ask "PT slab for women" --module pt --state MH --period 2026-09
-payroll-copilot tools list                                          # 16 read-only tools
-payroll-copilot tools run calculate_pf --args '{"employee_code": "ARIF-112", "period": "2026-09"}'
-payroll-copilot llm check                                           # is Ollama running + model pulled?
-payroll-copilot ask "ARIF-112 ka PF September 2026 mein kitna hai?" -v
-payroll-copilot chat                                                # interactive (keeps context)
-payroll-copilot qa run --period 2026-09                             # QA report (read-only)
-payroll-copilot qa run --period 2026-09 --save                      # ... and store in qa_runs
-payroll-copilot qa run --period 2026-09 --format csv --out qa.csv   # text | md | csv
-payroll-copilot qa history / qa show 1
-payroll-copilot api serve                                           # http://127.0.0.1:8000/docs
-payroll-copilot ui --with-api                                       # http://127.0.0.1:8501 (UI + API)
-payroll-copilot memory show cli / memory clear cli                  # conversation memory
-payroll-copilot audit list --action chat.ask / audit show 7         # audit trail
-payroll-copilot attendance show EMP-005 --period 2026-09            # paid-days trace
-payroll-copilot attendance diagnose EMP-002 --period 2026-09 --actual 30
-pytest --cov                                 # tests
-ruff check .                                 # lint
+payroll-chatbot db seed          # create tables, load statutory rules, add demo data
+payroll-chatbot db status        # row count per table
+payroll-chatbot api serve        # http://127.0.0.1:8000/docs
 ```
+
+Then in the browser open **http://127.0.0.1:8000/docs**:
+
+1. `POST /auth/login` → *Try it out* →
+   `{"email": "rahul.verma@example.com", "password": "Employee@123"}` → copy `access_token`.
+2. Click **Authorize** (top right) → enter the email as *username* and the password →
+   *Authorize*. Swagger now sends the token on every call.
+3. `GET /auth/me` → your profile. `GET /hr/employees` → **403** for an employee.
+4. *Logout* in Authorize, log in as HR (`anjali.mehta@example.com` / `Hr@12345`) →
+   `GET /hr/employees` → **200** with all 6 people.
+
+Other commands: `payroll-chatbot db reset --yes` (delete the SQLite DB and seed again),
+`payroll-chatbot rules load`, `payroll-chatbot check-config`, `pytest`, `ruff check .`.
+
+## Run Phase 2 (chat)
+
+Pick the model in `.env`:
+
+| `LLM_PROVIDER` | Needs | Cost |
+|---|---|---|
+| `ollama` (default) | [Ollama](https://ollama.com) running + `ollama pull qwen2.5:7b` (~4.7 GB download, ~6 GB RAM while answering) | free, local |
+| `anthropic` | `ANTHROPIC_API_KEY` from console.anthropic.com (`ANTHROPIC_MODEL`, default `claude-sonnet-5`) | billed per use - a claude.ai / Claude Code subscription login does not work for apps |
+| `none` | - | chat replies that the assistant is off |
+
+```powershell
+payroll-chatbot llm check                          # is the model reachable?
+payroll-chatbot chat rahul.verma@example.com       # chat in the terminal (asks the password)
+payroll-chatbot chat anjali.mehta@example.com      # as HR
+payroll-chatbot api serve                          # then POST /chat in http://127.0.0.1:8000/docs
+```
+
+Try: *"Mera August ka payslip dikhao"*, *"How many leaves do I have left?"*,
+*"Mera is saal ka tax kitna banega?"*, as HR: *"EMP-102 ke September ke absents dikhao"*.
+As an employee, *"Show Priya's payslip"* cannot work: employee tools have no employee
+parameter at all.
+
+### Chat API
+
+`POST /chat` `{"message": "...", "conversation_id": "optional"}` (logged in) →
+
+```json
+{"conversation_id": "a1b2c3d4e5f6a7b8",
+ "messages": [{"type": "text", "text": "Your August net pay was ₹58,000."},
+              {"type": "payslip_card", "payslip": {"...": "..."},
+               "download_url": "/payslips/2026-08/pdf"}],
+ "tools_used": ["get_payslip"], "model": "ollama:qwen2.5:7b", "warnings": []}
+```
+
+Other endpoints: `GET /chat/tools` (tools for your role), `DELETE /chat/{id}` (forget a
+conversation), `GET /payslips/{YYYY-MM}` (your own processed payslip). If the model is
+not reachable, `/chat` answers **503** with what to do.
+
+### Tools (read-only)
+
+| Tool | Role | Returns |
+|---|---|---|
+| `get_payslip(month?)` | employee, hr | own processed payslip (+ `payslip_card`); latest if no month |
+| `get_leave_balance()` | employee, hr | CL / SL / EL entitlement, taken, pending, available (current FY) |
+| `get_tax_summary(financial_year?)` | employee, hr | projected salary, deductions, taxable income, annual tax, TDS so far, monthly TDS |
+| `get_attendance_exceptions(emp_id, month)` | **hr** | absences without approved leave, LOP decided, approved leaves, payroll status |
+
+How the chat stays safe and correct (`src/payroll_copilot/chat/`):
+
+- The model only sees the tools for the user's role, and `run_tool` checks the role again.
+- Employee tools act on the logged-in user (no employee parameter); tool arguments are
+  validated (strict schemas, `additionalProperties: false`).
+- Cards are built from tool output, not from model text.
+- If the model writes a number that no tool returned, its text is replaced by the tool
+  facts and a warning is returned (`ungrounded_numbers`).
+- At most `LLM_MAX_STEPS` model calls per message; refusals and cut-off answers are handled.
+- Every tool call (`chat.tool`, incl. denied ones) and message (`chat.ask`) is audited;
+  tool audit rows are written at the end of the turn so no DB write lock is held while
+  the model thinks.
+- Conversation memory is in-memory per user (last 10 turns; lost on API restart).
+- Claude: official `anthropic` SDK, manual tool-use loop; the full assistant content is
+  sent back each step; no sampling parameters (current models reject them).
+
+Payroll for August 2026 is seeded as already processed; September is not (HR runs it in
+Phase 4), so *"September payslip"* correctly answers that it is not processed yet.
+Unapproved absences are never turned into LOP automatically - the payslip warns until HR
+decides.
+
+## Chat screen (Phase 3)
+
+`frontend/` - React 19 + TypeScript + Tailwind CSS 4, built with Vite.
+
+```powershell
+cd frontend
+npm install        # first time only
+npm run dev        # http://127.0.0.1:5173 (calls the API through the /api proxy)
+npm run build      # type-check + production build
+```
+
+- Login page (with one-click demo logins); session kept in `sessionStorage` (ends when the
+  tab closes); an expired token sends you back to login.
+- Header: bot name and the logged-in user with a lock icon (and an HR badge).
+- Messages rendered by `type`: `text` bubbles and `payslip_card` (earnings, deductions,
+  net pay, **Download PDF** -> `GET /payslips/{month}/pdf`, audited). `confirm_card` and
+  `lop_card` arrive with Phase 4.
+- Quick action chips: Payslip, Leave balance, Tax summary, Form 16; HR also gets Edit LOP
+  days and Run payroll (these two answer properly once Phase 4 adds the action tools).
+- ₹ amounts with Indian digit grouping (`Intl.NumberFormat("en-IN")`), "thinking"
+  indicator, clear errors when the API or the model is down, New chat, Logout.
+
+## Bulk payroll (any number of employees)
+
+HR: *"September 2026 ka payroll sab employees ka process karo"* (or *"sirf Sales team"*,
+*"sirf Delhi office"*) -> the LLM calls `start_payroll_review(month, department?,
+work_state?)` and gets back **only counts** (total, ok, needs review, batch_id); the full
+employee list never passes through the LLM. The chat shows a **bulk LOP card**:
+
+- tiles (total / no issues / needs LOP review), searchable paged table (checkbox, name + ID,
+  absent dates, −/+ LOP days in 0.5 steps up to the absent days, live ₹ deduction), the total
+  deduction for the **whole** batch from the backend, a required reason, and the buttons
+  **Sab skip karo** / **LOP lagao aur payroll chalao**;
+- then a progress bar (polls every 2 s), a summary, **Download report (CSV)** (processed,
+  LOP applied, failed + error per employee) and **Retry failed only**.
+
+How it works (`services/batch_service.py`, `services/batch_worker.py`):
+
+| Step | What happens |
+|---|---|
+| review | employees read from **this app's database** in pages of 100 through `LocalPayrollSource` (rate limiter + retry/backoff; no external or Zimyo system); every employee becomes a `batch_items` row (the job queue), employees with absences without approved leave become `batch_lop_items` (dates, suggested days, gross, divisor, per-day rate) |
+| run | `POST /batches/{id}/run`: one conditional `UPDATE ... WHERE status='REVIEW'` - a double click / second request gets **409** and nothing runs twice; LOP written to `lop_records` for checked rows, audited per employee with the `batch_id` |
+| worker | background thread inside the API (a DB-backed queue - no Redis/Celery needed on Windows); chunks of 50; **each employee in its own transaction** (payroll run + item status + audit commit together), so a crash/restart never pays anyone twice and the worker resumes `RUNNING` batches on start; one employee's error is recorded and the batch continues; temporary errors retried 3× with backoff; employee-months already processed are skipped |
+
+LOP per day = `LOP_BASE / LOP_DIVISOR` from `.env` (default gross / calendar days) and must
+match the payroll engine's proration (`DEFAULT_PAID_DAYS_BASIS`); `check-config` reports a
+mismatch, and a batch refuses to start with one. `LOP_BASE=BASIC` is not supported by the
+engine yet.
+
+Endpoints (HR only): `POST /batches`, `GET /batches/{id}/status`, `GET
+/batches/{id}/lop-items?page=&search=`, `PATCH /batches/{id}/lop-items/{emp_id}`,
+`POST /batches/{id}/run`, `POST /batches/{id}/retry-failed`, `GET /batches/{id}/report.csv`.
+Settings: `BATCH_PAGE_SIZE`, `BATCH_SOURCE_RATE`, `BATCH_CHUNK_SIZE`, `BATCH_MAX_ATTEMPTS`,
+`BATCH_WORKER_ENABLED`.
+
+Tests (`tests/unit/batch/`): 5,000 employees with 2% exceptions, one employee failing +
+retry failed only, 5 simultaneous run clicks (exactly one runs), department / state filters,
+server killed mid-batch then restarted (everyone processed exactly once), already processed
+employees skipped, temporary errors retried, end-to-end with the real payroll engine.
+
+## Demo users
+
+| Code | Name | Login | Role | Scenario |
+|---|---|---|---|---|
+| EMP-101 | Rahul Verma | rahul.verma@example.com / Employee@123 | employee | MH, ₹60,000; EL in Aug; 1 unapproved absence in Sep |
+| EMP-102 | Priya Nair | priya.nair@example.com / Employee@123 | employee | KA, ₹40,000; approved CL + 2 unapproved absences in Sep |
+| EMP-103 | Rohan Das | rohan.das@example.com / Employee@123 | employee | WB, ₹18,000, ESIC; approved SL; pending EL for Oct |
+| EMP-104 | Meena Iyer | meena.iyer@example.com / Employee@123 | employee | TN, ₹50,000, old tax regime; clean month |
+| EMP-105 | Kavita Reddy | kavita.reddy@example.com / Employee@123 | employee | TG, ₹25,000; joined 15-Sep-2026 |
+| HR-001 | Anjali Mehta | anjali.mehta@example.com / Hr@12345 | **hr** | MH, ₹75,000 |
+
+Plus **50 generated employees** `EMP-201` … `EMP-250` (`dummy_employees: 50` in the seed
+file): repeatable fake names, 7 departments, 9 states, gross ₹15,000–₹2,00,000 (ESIC up to
+₹21,000), ~20% with unapproved absences in September, August payroll processed. Login
+`<firstname>.<lastname>.<number>@example.com` / `Employee@123` (HR sees the list in
+`GET /hr/employees`). Add more to an existing DB: `payroll-chatbot db add-dummy --count 50`.
+
+Seed file: `config/seed/chatbot_seed.yaml`. Attendance is generated per day for Aug and
+Sep 2026: Sundays = week off, 15-Aug and 14-Sep = holidays, approved leaves = LEAVE,
+listed absences = ABSENT (an ABSENT day without approved leave is an *attendance
+exception* for the Phase 4 LOP flow), everything else = PRESENT.
+
+## Database
+
+| Table | Purpose |
+|---|---|
+| `employees` | master data + login (email, bcrypt `password_hash`, `role` employee/hr, `login_enabled`) and PF/ESIC/PT/tax flags |
+| `salary_structure` | full-month amount per salary head, per effective date (split from gross by the structure engine) |
+| `attendance` | one row per employee per day (PRESENT / ABSENT / LEAVE / HALF_DAY / WEEK_OFF / HOLIDAY) |
+| `leaves` | leave applications (CL / SL / EL / LOP, PENDING / APPROVED / ...) |
+| `lop_records` | LOP days HR decided per employee and month, with reason |
+| `payroll_runs` | processed payroll per employee and month, full payslip JSON |
+| `audit_log` | who (`actor_id`, `actor_role`), what (`action`, `entity`), when (`at`), `old_value`, `new_value`, `request_id` |
+| `pf_rules`, `esic_rules`, `pt_rules`/`pt_slabs`, `lwf_rules`, `tds_rules`/`tds_slabs` | versioned statutory rules from `config/rules/**` |
+
+Migrations: `alembic/versions` (SQLite now; the models are PostgreSQL-ready).
+
+## Login and security
+
+- `POST /auth/login` (JSON) or `POST /auth/token` (form, used by Swagger) →
+  JWT (HS256, `JWT_EXPIRE_MINUTES`, default 8 h) with the employee id and role.
+- Every request reloads the employee: a disabled login or changed role stops old tokens
+  immediately. A token whose role does not match the database is rejected.
+- Role checks are FastAPI dependencies in the backend (`require_hr`), never only a prompt.
+- Wrong email and wrong password give the same message and take the same time.
+- Passwords: bcrypt; longer than 72 bytes is rejected (bcrypt would silently truncate).
+- Every login and failed login is written to `audit_log` (never the password).
+- `JWT_SECRET` is required in prod (≥ 32 characters). Without it in dev a random key is
+  used per run. The API refuses a non-localhost host without `JWT_SECRET`.
+
+## Payroll engine (kept from the previous project)
+
+`src/payroll_copilot/calculations` + `config/rules`: salary proration, PF/EPS/EDLI,
+ESIC, PT (all states), LWF, TDS (old/new regime), arrears, F&F, each with a calculation
+trace. All rule values are seed values marked **UNVERIFIED** - verify them before real
+use. EPF: ₹15,000 ceiling until 31-Aug-2026, ₹25,000 from 01-Sep-2026.
+
+LOP policy (used from Phase 4) comes from config, not the LLM:
+`LOP per day = LOP_BASE (GROSS | BASIC) / LOP_DIVISOR (FIXED_30 | CALENDAR | WORKING_DAYS)`.
 
 ## Layout
 
 ```
-config/rules/{pf,esic,pt,lwf,tds}/*.yaml   versioned statutory rules (UNVERIFIED seed values)
-config/seed/demo_company.yaml              demo company, heads, structures, 10 employees
-alembic/                                   migrations (SQLite now, PostgreSQL ready)
+config/rules/        versioned statutory rules (YAML)
+config/payroll/      salary heads and structure templates
+config/seed/         demo company for the chatbot
+alembic/             migrations
 src/payroll_copilot/
-  core/        config, money (Decimal-only), dates, logging, exceptions
-  domain/      shared enums
-  db/          models (28 tables), portable DecimalType, session, migrate, seed
-  rules/       YAML schemas, loader, applicability conditions, resolver, service
-  calculations/ trace (CalculationResult), structure breakup, pay summary buckets
-  repositories/ employee + salary data access (ORM -> domain objects)
-  services/    salary structure view per employee and period
-tests/unit/    core, db, rules, calculations, services, CLI
+  core/          config, money (Decimal only), dates, logging, exceptions
+  domain/        enums and value objects shared by the engine
+  calculations/  deterministic payroll engine
+  rules/         rule loader, applicability, resolver
+  db/            models, session, migrations, seed
+  auth/          password hashing, JWT, current user + role dependencies, login
+  repositories/  DB -> engine inputs (daily attendance + LOP -> monthly record, ...)
+  services/      payroll / PF / ESIC / PT / LWF / TDS services, payslip, leave, audit
+  chat/          tools (role checks) and the chat loop (grounding, memory)
+  llm/           providers: Ollama (HTTP) and Claude (anthropic SDK)
+  api/           FastAPI app
+tests/unit/      engine, rules, config, schema + seed, auth, tools, chat loop, providers
 ```
-
-## Rule versioning
-
-- One YAML file = one rule family (`rule_code`) with dated versions.
-- The resolver picks exactly one version per employee + period, using effective
-  dates and `applicability` conditions. Zero matches, overlaps and mid-month rule
-  changes are explicit errors - it never guesses.
-- `UNVERIFIED` rules work but add a warning to every trace; set
-  `ALLOW_UNVERIFIED_RULES=false` to block them. `VERIFIED` rule values are
-  immutable - add a new version instead.
-- EPF: v1 = ₹15,000 ceiling until 31-Aug-2026, v2 = ₹25,000 ceiling from 01-Sep-2026.
-
-## Paid days
-
-`Paid days = payable days in the employed span − LOP days`
-
-| Basis | Basis days | Full month | Partial month (DOJ/LWD inside month) |
-|---|---|---|---|
-| CALENDAR | days in month | days in month | employed calendar days |
-| FIXED_30 / FIXED_26 | 30 / 26 | 30 / 26 | basis × employed / calendar days (**warns**: confirm policy) |
-| WORKING_DAYS | month working days | working days | employed working days (needs work calendar) |
-
-LOP reversal days are reported separately and paid as arrear at the earlier
-month's rate - they are never added to the current month's paid days.
-
-## Salary proration
-
-- Prorated head = full-month amount × segment paid days / basis days, **rounded per
-  line** (`DEFAULT_ROUNDING_MODE`); gross = Σ rounded lines. Non-prorated heads are
-  paid in full.
-- Salary change within a month → one segment per structure assignment. LOP is
-  allocated by `DEFAULT_LOP_ALLOCATION` (`LAST_SEGMENT` or `PROPORTIONAL`) with a warning.
-- LOP reversal → arrear lines at the previous month's structure and basis days.
-- Every result explains the gap to the full-month gross: LOP, days not employed,
-  mid-month revision, rounding.
-
-## PF
-
-All rates, ceilings, EPS age limit and rounding come from the PF rule version.
-
-```
-PF wage      = min(earned PF wage, ceiling)   (actual wage if pf_wage_restricted = false)
-Employee PF  = PF wage × employee rate
-EPS          = min(PF wage, EPS ceiling) × EPS rate    (0 if not eligible / age ≥ max)
-Employer EPF = PF wage × employer rate − EPS
-EDLI         = min(PF wage, EDLI ceiling) × EDLI rate
-EPF admin    = PF wage × admin rate   (minimum is per establishment, not per employee)
-```
-
-## ESIC
-
-- `esic_applicable = false` → employee/location not under ESIC.
-- Coverage is tested once per contribution period (rule: Apr–Sep, Oct–Mar) on
-  max(period start, DOJ) using the **full-month** ESIC wage rate (no arrears);
-  covered employees stay covered until the period ends even after an increment.
-- Contributions = earned ESIC wage (incl. arrears paid this month) × rule rates,
-  rounded per rule (seed: CEIL).
-- Not modelled yet: employee-share exemption for very low daily wages.
-
-## PT and LWF
-
-- PT rule per work state: levied or not, deduction months, slab wage basis
-  (monthly / half-yearly / annual income), gender slabs, month overrides.
-- Half-yearly/annual income = months with attendance are calculated; other months
-  are estimated (past) or projected (future) from the salary structure, with a warning.
-- A state without a configured rule is reported as **NOT CALCULATED** (never ₹0).
-- LWF: fixed amounts or % of LWF wage with cap and employer multiplier, only in
-  the rule's deduction months.
-
-## TDS
-
-- Rule per FY + regime (+ age for old regime): slabs, standard deduction, rebate
-  and marginal relief, surcharge (with marginal relief), cess, section deduction
-  limits and whether PT is deductible - all in `config/rules/tds/*.yaml`.
-- FY salary = calculated months + structure estimates (past) + projections (future).
-- TDS already deducted comes from actual payroll history; without history an even
-  deduction for earlier months is assumed (warning). Leavers pay the balance in the
-  final month. A TDS override is what-if in a calculation request, or permanent once an
-  approved `TDS_OVERRIDE` request is executed (the trace names the approval).
-
-## Arrears and F&F
-
-- **As paid:** a month whose revision is paid later as arrear is calculated with the
-  old amounts (what was actually paid then); the arrear appears as separate lines
-  in the payment month. No double counting in half-yearly PT or annual TDS.
-- Arrear = (new − old) × paid days / basis days of the arrear month.
-- PF on arrears is month-wise with that month's PF rule and ceiling:
-  PF(new salary) − PF(old salary). ESIC, PT and TDS count arrears in the payment month.
-- Uploaded arrear amounts are compared with the expected amount per head.
-- F&F: leave encashment and notice recovery use `FNF_*` policy settings; gratuity is
-  flagged (no gratuity rule configured yet), not computed.
-
-## Expected vs actual
-
-- `config/seed/actual_payroll_2026_09.yaml` builds a demo ACTUAL run from the expected
-  payslips plus documented deliberate errors (old PF ceiling, LOP not deducted, joiner
-  paid full month, arrear / LOP reversal not paid, ESIC rounding, wrong PT slab,
-  inconsistent header).
-- Every component → Expected / Actual / Difference / Status (`COMPARISON_TOLERANCE`
-  in ₹; days must match exactly) + issue type + root causes + expected trace.
-- Root causes are recomputations that reproduce the actual value: other PF rule
-  versions, other rounding modes, other PT slabs, the correct rule on the actual
-  (wrong) wage (= UPSTREAM), LOP / DOJ / arrear amounts, and net-pay reconciliation.
-
-## RAG knowledge base
-
-```
-knowledge_base/<module>/*.md|txt|pdf|docx  + <file>.meta.yaml (required metadata)
-  → load → clean → chunk (Markdown headings kept) → local embeddings (BAAI/bge-small)
-  → Chroma (data/chroma) → filter (module, period, IN / IN-<state>) → vector + BM25
-  → RRF fusion + metadata rerank → answer with numbered sources
-```
-
-- Statutory rule documents are **generated** from `config/rules` (`kb generate`), one per
-  rule version, so the assistant says exactly what the engine calculates.
-- A period only ever retrieves documents effective in that period; nothing effective →
-  "not found" (never an older/newer version).
-- Without an LLM the answer is extractive (excerpts + sources). With an LLM the model
-  must answer only from the numbered context; numbers not in the sources are flagged.
-- The embedding model is downloaded once from HuggingFace into `data/models`; after that
-  everything runs offline. Tests use deterministic fake embeddings (`-m slow` uses the
-  real model if cached).
-
-## LangChain tools and LLM
-
-- 17 tools (`payroll_copilot.tools.build_tools`): employee, salary structure, attendance,
-  actual payroll, expected payslip, salary / PF / PF-rule comparison / ESIC / PT / TDS /
-  arrear / F&F calculations, expected-vs-actual, payroll-run validation, policy search.
-- All tools are read-only (`metadata["access"] == "read"`, DB sessions always roll back),
-  validate their arguments with Pydantic, mask PAN/UAN, and return
-  `content_and_artifact`: short text for the LLM + JSON with values and traces.
-- Domain errors come back as `ERROR: ...` text so the agent can recover or ask.
-- LLM: `LLM_PROVIDER=ollama` + `LLM_MODEL=qwen2.5:7b` (free, local). Install Ollama and run
-  `ollama pull qwen2.5:7b`; `payroll-copilot llm check` tells what is missing.
-  With `LLM_PROVIDER=none` everything deterministic still works.
-
-## LangGraph copilot
-
-```
-START → intent_detection → entity_extraction → route
-  ├─ clarify (missing employee / month) → END
-  ├─ knowledge → retrieve_rules → explanation → final_response → END
-  ├─ general → general_agent (LLM tool-calling, or help) → final_response → END
-  └─ attendance / salary / structure / payslip / PF / PF-compare / ESIC / PT / TDS /
-     arrear / F&F / QA → retrieve_data → [retrieve_rules] → calculation → validation
-     → explanation → final_response → END
-```
-
-- Intent and entities are rule-based (English + Hinglish; employee code or name; periods
-  like `2026-09`, `Sep 2026`, `September 2026`), so the copilot works without an LLM.
-- A thread remembers the last employee and month for follow-ups ("aur ESIC?").
-  Memory is persistent (see Memory and audit).
-- Write requests in chat ("EMP-009 ka TDS 2026-09 ke liye 3000 override karo") go to
-  `prepare_action` → preview → the graph pauses (`interrupt`) → `yes` / `haan` submits an
-  approval request (PENDING), `no` cancels. Chat never executes a write itself.
-- The LLM (optional) only explains tool output; if its text contains a number that is
-  not in the tool output, the deterministic explanation is used instead (warning shown).
-
-## Payroll QA agent
-
-`scope → validate → categorize → summarize` (LangGraph subgraph, read-only):
-every employee is validated, component mismatches are grouped into **findings**
-(one primary cause per category; dependent mismatches become effects), each with
-severity, lead component, expected / actual / difference and a recommendation.
-The report adds clean vs issue counts, net pay over/under-paid and statutory impact.
-On the demo run it finds exactly the 8 injected errors from 64 component mismatches.
-Saving (`--save` → `qa_runs` / `qa_issues`) creates a `SAVE_QA_RUN` approval request;
-the run is stored only after an approver approves it.
-
-## API
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/health` | status, DB check, newest data month `latest_period` (no auth) |
-| GET | `/employees`, `/employees/{code}` | employee list / master (PAN, UAN masked) |
-| GET | `/employees/{code}/attendance?period=` | attendance + paid-days trace |
-| GET | `/employees/{code}/salary-structure?period=` | structure + applicable compliance |
-| GET | `/employees/{code}/payroll?period=` | ACTUAL payslip (404 if none) |
-| GET | `/employees/{code}/payslip?period=` | EXPECTED payslip |
-| POST | `/calculate/salary\|pf\|esic\|pt\|tds\|arrear\|payroll\|pf-rules` | `{employee_code, period}` |
-| POST | `/calculate/fnf` | `{employee_code}` |
-| POST | `/validate/employee`, `/validate/payroll` | expected vs actual / QA report (not saved) |
-| GET | `/qa/runs`, `/qa/runs/{id}` | saved QA runs |
-| POST | `/kb/search` | policy passages with citations |
-| POST | `/chat` | copilot (thread memory) |
-| GET | `/tools` | tools available to the agent |
-| POST | `/approvals` | create a write request (X-User required) → 201 PENDING + preview |
-| GET | `/approvals?status=`, `/approvals/{id}` | list / show requests |
-| POST | `/approvals/{id}/approve\|reject` | decide (`{comment}`; reject needs one) |
-
-- `X-API-Key` required when `API_KEY` is set (mandatory in prod). The server refuses a
-  non-localhost host without an API key.
-- Operation responses are `{text, data}`; money is always a string; traces included.
-- Errors: 404 not found, 422 invalid input / rule problem, 503 configuration, 401 auth,
-  403 not allowed to approve, 409 request already decided / not valid any more.
-- The only writes are through `/approvals`.
-
-## Streamlit UI
-
-`payroll-copilot ui --with-api` starts the API and the UI on localhost. The UI only
-calls the API (never the database directly).
-
-- **Sidebar:** API/DB/LLM status, employee and payroll-month selectors (default = newest
-  month with attendance data), acting user + token, new conversation.
-- Results stay on screen across reruns (download, toggles) until the employee / month /
-  calculation they belong to changes.
-- **💬 Chat:** copilot with thread memory; the selected employee/month is added to a
-  question only when it names neither (never to policy questions). Each answer shows
-  route/tools/sources and the calculation traces as tables.
-- **🧮 Calculation:** payslip (earnings / deductions / employer contributions / totals),
-  salary, attendance, structure, PF, PF old vs new, ESIC, PT, TDS, arrears, F&F.
-- **⚖️ Expected vs Actual:** component table with ✅ / ❌ status, issue type and root cause.
-- **📋 QA Report:** metrics, findings by category chart, findings table, CSV download,
-  "request save" (creates a `SAVE_QA_RUN` approval), saved runs.
-- **📚 Policy:** period / module / state-filtered knowledge-base search with citations.
-- **✅ Approvals:** pending requests with preview, approve / reject with comment (as the
-  sidebar "Acting as" user), decided requests.
-
-Streamlit usage statistics are disabled (`.streamlit/config.toml`).
-
-## Memory and audit
-
-- **Memory:** LangGraph `SqliteSaver` in `CHECKPOINT_DB` (`data/checkpoints.db`). A thread
-  keeps its messages and last employee / month across restarts, so follow-ups work
-  between separate `ask` commands, API restarts and UI sessions.
-  `GET /chat/{thread}` shows it, `DELETE /chat/{thread}` / `memory clear` forgets it.
-- **Audit (`audit_logs`):** `chat.ask` (question, intent, route, tools, rule versions,
-  warnings), `tool.call` (args, ok/error, rule versions), `api.request` (method, path,
-  status, duration), and admin actions `qa.save`, `rules.sync`, `payroll.seed_actual`.
-  One request id links a chat turn to its tool calls (`X-Request-ID` header).
-- Actor: `X-User` header for the API (validated), OS user for the CLI.
-- PAN, 12-digit identifiers (UAN/Aadhaar) and secrets are masked; long text truncated.
-- Audit is written in its own transaction. For reads a failed audit write is logged and
-  ignored; for writes (`qa.save`) it is part of the same transaction - no audit, no save.
-- `GET /audit`, `payroll-copilot audit list|show`. Disable with `AUDIT_ENABLED=false`.
-
-## Conventions
-
-- Money is always `Decimal`; floats are rejected. On SQLite money columns are
-  stored as exact text, so compare them in Python, not in SQL.
-- Rates are percentages (`Decimal("12")` = 12%).
-- Payroll period format: `YYYY-MM`; financial year: `YYYY-YY` (e.g. `2026-27`).
-
-## Approvals (maker-checker)
-
-| Action | Preview | On approve |
-|---|---|---|
-| `TDS_OVERRIDE` | current vs new monthly TDS | stores an active `tds_overrides` row (replaces the old one) |
-| `ATTENDANCE_CORRECTION` | LOP and paid days before / after | sets LOP (`source = APPROVAL#id`); fails if LOP changed since the request |
-| `SAVE_QA_RUN` | findings count | runs QA again and saves it |
-| `VERIFY_RULE` | rule status (must be UNVERIFIED) | marks the rule VERIFIED + stores the evidence; a later `rules sync` keeps it |
-
-- `APPROVERS=["priya.hr","rahul.fin"]` in `.env`. No approvers → nothing can be approved.
-- `USER_TOKENS={"priya.hr":"...","hr.user":"..."}`: when set, the API accepts `X-User` only
-  with that user's `X-User-Token` (otherwise 401; audit actor `api:anonymous`), so nobody can
-  approve by sending an approver's name. Required in prod when `APPROVERS` is set. The UI
-  sends it from the sidebar "User token" field.
-- The requester can never approve or reject their own request (the channel does not
-  matter: `cli:alice` = `api:alice`). Reject needs a comment.
-- Approval runs the action in a savepoint: any error → rolled back, status `FAILED` with
-  the error. Request, execute and failure are audited (strict: no audit, no write).
-- CLI: `approval request tds-override|attendance|qa-save|verify-rule ... --as USER`,
-  `approval list [--status PENDING]`, `approval show ID`,
-  `approval approve|reject ID --as USER --comment "..."`.

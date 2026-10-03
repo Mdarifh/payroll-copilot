@@ -1,1 +1,1 @@
-"""Use-case services: fetch data via repositories, run calculations, return views."""
+"""Application services used by the API (and, from Phase 2, by the chatbot tools)."""

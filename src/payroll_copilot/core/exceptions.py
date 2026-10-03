@@ -71,3 +71,11 @@ class MidPeriodRuleChangeError(RuleError):
 
 class UnverifiedRuleError(RuleError):
     """Only an UNVERIFIED rule applies and ALLOW_UNVERIFIED_RULES is false."""
+
+
+class AuthError(PayrollCopilotError):
+    """Login failed or the access token is missing / invalid / expired (HTTP 401)."""
+
+
+class PermissionDeniedError(PayrollCopilotError):
+    """The logged-in user's role may not do this (HTTP 403)."""

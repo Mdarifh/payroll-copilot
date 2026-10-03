@@ -131,3 +131,44 @@ def date_ranges_overlap(
     a_end = a_end or date.max
     b_end = b_end or date.max
     return a_start <= b_end and b_start <= a_end
+
+
+_MONTH_NAMES = {name.lower(): i for i, name in enumerate(calendar.month_name) if name} | {
+    name.lower(): i for i, name in enumerate(calendar.month_abbr) if name
+} | {"sept": 9}
+_LOOSE_PERIOD = [
+    (re.compile(r"^(\d{4})[-/ ](\d{1,2})$"), "ym"),
+    (re.compile(r"^(\d{1,2})[-/ ](\d{4})$"), "my"),
+    (re.compile(r"^([a-z]+)\.?[-,' ]*(\d{4})$"), "named"),
+]
+
+
+def parse_month(text: str) -> PayrollPeriod:
+    """Payroll month from 'YYYY-MM', '2026/9', '09-2026', 'Sep 2026', 'September, 2026'."""
+    value = text.strip().lower()
+    for pattern, order in _LOOSE_PERIOD:
+        match = pattern.match(value)
+        if not match:
+            continue
+        a, b = match.groups()
+        if order == "named":
+            if a not in _MONTH_NAMES:
+                break
+            return PayrollPeriod(int(b), _MONTH_NAMES[a])
+        year, month = (a, b) if order == "ym" else (b, a)
+        return PayrollPeriod(int(year), int(month))
+    raise PeriodError(f"Month must look like YYYY-MM (e.g. 2026-09), got {text!r}")
+
+
+def parse_financial_year(text: str) -> FinancialYear:
+    """'2026-27', 'FY 2026-27', '2026-2027' or a start year '2026'."""
+    value = text.strip().upper().removeprefix("FY").strip()
+    if re.fullmatch(r"\d{4}", value):
+        return FinancialYear(int(value))
+    match = re.fullmatch(r"(\d{4})-(\d{4})", value)
+    if match:
+        start, end = map(int, match.groups())
+        if end != start + 1:
+            raise PeriodError(f"Financial year end does not follow start: {text!r}")
+        return FinancialYear(start)
+    return FinancialYear.parse(value)

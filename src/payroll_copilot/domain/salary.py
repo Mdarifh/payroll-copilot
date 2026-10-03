@@ -26,6 +26,10 @@ class SalaryHeadInfo(_Frozen):
     part_of_gross: bool = False
     part_of_ctc: bool = False
     display_order: int = 0
+    # Employee Directory: which tab shows the head, and its income-tax treatment
+    display_group: str | None = None  # EARNINGS | ALLOWANCES
+    tax_treatment: str | None = None  # TAXABLE | EXEMPT_WITH_LIMIT | EXEMPT_ON_BILLS
+    tax_note: str | None = None
 
 
 class StructureComponentSpec(_Frozen):

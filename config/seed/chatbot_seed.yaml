@@ -1,0 +1,264 @@
+# Demo data for the payroll chatbot. Fictional company and people (local SQLite only).
+# Focus payroll month: September 2026. August 2026 is the previous (history) month.
+#
+# Attendance is generated per day: Sundays = WEEK_OFF, company holidays = HOLIDAY,
+# approved leaves = LEAVE, listed absences = ABSENT, every other employed day = PRESENT.
+# An ABSENT day without an approved leave is an "attendance exception" (Phase 4 LOP flow).
+#
+# Demo logins (change them before sharing the app):
+#   employees: <email> / Employee@123      HR: anjali.mehta@example.com / Hr@12345
+
+attendance_months: ["2026-08", "2026-09"]
+# Months whose payroll is already processed (by the HR user) - employees can ask for
+# these payslips. September is left for HR to run from the chat (Phase 4).
+processed_months: ["2026-08"]
+# Generated extra employees (EMP-201 ...): repeatable fake names, departments, states and
+# salaries; about 20% have unapproved absences in September. 0 = none.
+dummy_employees: 50
+
+holidays:
+  - {day: 2026-08-15, name: Independence Day}
+  - {day: 2026-09-14, name: Ganesh Chaturthi}
+
+passwords:
+  employee: Employee@123
+  manager: Manager@123
+  hr: Hr@12345
+  payroll_manager: Hr@12345
+  payroll_executive: Hr@12345
+  viewer: Hr@12345
+
+# office per work state (employees without an explicit location get this)
+locations: {MH: Mumbai, KA: Bengaluru, WB: Kolkata, TN: Chennai, TG: Hyderabad, DL: Delhi,
+            GJ: Ahmedabad, UP: Noida, HR: Gurugram}
+# reporting manager per department (manager role sees only their team, never amounts)
+department_managers: {Engineering: MGR-001}
+
+employees:
+  - employee_code: EMP-101
+    scenario: Normal month in Aug; one unapproved absence in Sep (LOP decision needed)
+    full_name: Rahul Verma
+    email: rahul.verma@example.com
+    gender: M
+    dob: 1990-05-14
+    doj: 2022-04-01
+    work_state: MH
+    department: Engineering
+    designation: Senior Engineer
+    uan: "100000000101"
+    pan: ABCPV1234K
+    pf_join_date: 2022-04-01
+    tax_regime: NEW
+    salary: {template: STD-2026, monthly_gross: 60000, effective_from: 2026-04-01}
+    leaves:
+      - {leave_type: EL, from_date: 2026-08-17, to_date: 2026-08-19, status: APPROVED, reason: Family function}
+    absences: [2026-09-22]
+
+  - employee_code: EMP-102
+    scenario: Approved CL in Sep plus two unapproved absences (exceptions)
+    full_name: Priya Nair
+    email: priya.nair@example.com
+    gender: F
+    dob: 1994-11-02
+    doj: 2023-07-10
+    work_state: KA
+    department: Finance
+    designation: Analyst
+    uan: "100000000102"
+    pan: BCDPN2345L
+    pf_join_date: 2023-07-10
+    tax_regime: NEW
+    salary: {template: STD-2026, monthly_gross: 40000, effective_from: 2025-04-01}
+    leaves:
+      - {leave_type: CL, from_date: 2026-09-10, to_date: 2026-09-11, status: APPROVED, reason: Personal work}
+    absences: [2026-09-24, 2026-09-25]
+
+  - employee_code: EMP-103
+    scenario: ESIC employee (gross ₹18,000), approved SL in Sep, pending EL for Oct
+    full_name: Rohan Das
+    email: rohan.das@example.com
+    gender: M
+    dob: 1999-01-20
+    doj: 2024-02-01
+    work_state: WB
+    department: Operations
+    designation: Associate
+    uan: "100000000103"
+    pan: CDEPD3456M
+    pf_join_date: 2024-02-01
+    esic_applicable: true
+    esic_ip_number: "3100000103"
+    tax_regime: NEW
+    salary: {template: LOW-2026, monthly_gross: 18000, effective_from: 2025-04-01}
+    leaves:
+      - {leave_type: SL, from_date: 2026-09-03, to_date: 2026-09-03, status: APPROVED, reason: Fever}
+      - {leave_type: EL, from_date: 2026-10-08, to_date: 2026-10-09, status: PENDING, reason: Trip home}
+    absences: []
+
+  - employee_code: EMP-104
+    scenario: Clean month, old tax regime
+    full_name: Meena Iyer
+    email: meena.iyer@example.com
+    gender: F
+    dob: 1988-08-08
+    doj: 2021-06-15
+    work_state: TN
+    department: Sales
+    designation: Sales Manager
+    uan: "100000000104"
+    pan: DEFPI4567N
+    pf_join_date: 2021-06-15
+    tax_regime: OLD
+    salary: {template: STD-2026, monthly_gross: 50000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: EMP-105
+    scenario: Joined mid-month on 15-Sep-2026 (partial month)
+    full_name: Kavita Reddy
+    email: kavita.reddy@example.com
+    gender: F
+    dob: 1998-03-30
+    doj: 2026-09-15
+    work_state: TG
+    department: Customer Support
+    designation: Support Executive
+    uan: "100000000105"
+    pan: EFGPR5678P
+    pf_join_date: 2026-09-15
+    tax_regime: NEW
+    salary: {template: LOW-2026, monthly_gross: 25000, effective_from: 2026-09-15}
+    leaves: []
+    absences: []
+
+  - employee_code: HR-001
+    scenario: HR user (also an employee with a payslip)
+    role: hr
+    full_name: Anjali Mehta
+    email: anjali.mehta@example.com
+    gender: F
+    dob: 1987-12-05
+    doj: 2020-01-06
+    work_state: MH
+    department: Human Resources
+    designation: HR Manager
+    uan: "100000000001"
+    pan: FGHPM6789Q
+    pf_join_date: 2020-01-06
+    tax_regime: NEW
+    salary: {template: STD-2026, monthly_gross: 75000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: HR-002
+    scenario: Second HR user - approves payroll prepared by HR-001 (maker-checker)
+    role: hr
+    full_name: Rohit Kapoor
+    email: rohit.kapoor@example.com
+    gender: M
+    dob: 1985-03-18
+    doj: 2019-07-01
+    work_state: MH
+    department: Human Resources
+    designation: Payroll Lead
+    uan: "100000000002"
+    pan: GHIPK7890R
+    pf_join_date: 2019-07-01
+    tax_regime: NEW
+    salary: {template: STD-2026, monthly_gross: 70000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: PM-001
+    scenario: Payroll staff role payroll_manager (Phase 10 RBAC demo)
+    role: payroll_manager
+    full_name: Kavita Rao
+    email: kavita.rao@example.com
+    gender: F
+    dob: 1984-11-02
+    doj: 2021-04-01
+    work_state: GJ
+    department: Human Resources
+    designation: Payroll Manager
+    pan: KLMPR1234A
+    tax_regime: NEW
+    pf_applicable: false
+    pf_exempt_reason: Demo staff user (no PF needed for the demo)
+    salary: {template: STD-2026, monthly_gross: 60000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: PX-001
+    scenario: Payroll staff role payroll_executive (Phase 10 RBAC demo)
+    role: payroll_executive
+    full_name: Sameer Khan
+    email: sameer.khan@example.com
+    gender: M
+    dob: 1993-06-21
+    doj: 2021-04-01
+    work_state: GJ
+    department: Human Resources
+    designation: Payroll Executive
+    pan: NOPQK5678B
+    tax_regime: NEW
+    pf_applicable: false
+    pf_exempt_reason: Demo staff user (no PF needed for the demo)
+    salary: {template: STD-2026, monthly_gross: 60000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: VW-001
+    scenario: Payroll staff role viewer (Phase 10 RBAC demo)
+    role: viewer
+    full_name: Neha Gupta
+    email: neha.gupta@example.com
+    gender: F
+    dob: 1991-02-14
+    doj: 2021-04-01
+    work_state: GJ
+    department: Human Resources
+    designation: Finance Analyst
+    pan: RSTUG9012C
+    tax_regime: NEW
+    pf_applicable: false
+    pf_exempt_reason: Demo staff user (no PF needed for the demo)
+    salary: {template: STD-2026, monthly_gross: 60000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: MGR-001
+    scenario: Engineering manager - sees team profiles, no salary amounts
+    role: manager
+    full_name: Sneha Kapoor
+    email: sneha.kapoor@example.com
+    gender: F
+    dob: 1986-06-21
+    doj: 2018-02-12
+    work_state: KA
+    department: Engineering
+    designation: Engineering Manager
+    uan: "100000000003"
+    pan: HIJPK8901S
+    pf_join_date: 2018-02-12
+    tax_regime: NEW
+    salary: {template: STD-2026, monthly_gross: 120000, effective_from: 2025-04-01}
+    leaves: []
+    absences: []
+
+  - employee_code: INT-001
+    scenario: Intern on stipend - PF not applicable
+    full_name: Aditya Rao
+    email: aditya.rao@example.com
+    gender: M
+    dob: 2004-01-09
+    doj: 2026-07-01
+    work_state: KA
+    department: Engineering
+    designation: Intern
+    employee_category: INTERN
+    pf_applicable: false
+    pf_exempt_reason: "Intern on stipend - not an employee for PF"
+    tax_regime: NEW
+    salary: {template: LOW-2026, monthly_gross: 15000, effective_from: 2026-07-01}
+    leaves: []
+    absences: []

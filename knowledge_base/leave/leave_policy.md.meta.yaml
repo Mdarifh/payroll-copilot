@@ -1,0 +1,11 @@
+module: leave
+document_name: Leave policy
+rule_name: LEAVE
+version: "1"
+effective_from: 2025-04-01
+effective_to: null
+jurisdiction: IN
+source: Demo company payroll policy (fictional) - PayrollAI Copilot configuration
+status: UNVERIFIED
+doc_type: policy
+access_roles: [employee, manager, hr]

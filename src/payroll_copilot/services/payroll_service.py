@@ -6,6 +6,7 @@ ones not calculated yet so a payslip is never mistaken for complete.
 
 from collections.abc import Sequence
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -44,6 +45,8 @@ class PayrollView(BaseModel):
     summary: PaySummary
     pending_components: list[str]
     warnings: list[str] = Field(default_factory=list)
+    # overtime entries and one-off adjustments paid this month (traceability on the payslip)
+    adjustments: dict[str, Any] = Field(default_factory=dict)
 
     def to_text(self) -> str:
         s = self.summary
@@ -94,6 +97,7 @@ class PayrollView(BaseModel):
 
 class PayrollCalculationService:
     def __init__(self, session: Session) -> None:
+        self.session = session
         self.pf_service = PFService(session)
         self.esic_service = ESICService(session)
         self.pt_service = PTService(session)
@@ -109,9 +113,19 @@ class PayrollCalculationService:
         tds_override_reason: str | None = None,
         variable_earnings: Sequence[PayLine] = (),
         extra_deductions: Sequence[PayLine] = (),
+        include_adjustments: bool = True,
     ) -> PayrollView:
-        salary = self.salary_service.calculate(employee_code, period, variable_earnings)
+        """``include_adjustments``: add the month's ACTIVE overtime entries and one-off
+        adjustments from the database (services.pay_adjustments)."""
         employee = self.salary_service.employees.get_by_code(employee_code)
+        detail: dict[str, Any] = {}
+        if include_adjustments:
+            from payroll_copilot.services.pay_adjustments import payroll_lines
+
+            earned, deducted, detail = payroll_lines(self.session, employee, period)
+            variable_earnings = [*variable_earnings, *earned]
+            extra_deductions = [*extra_deductions, *deducted]
+        salary = self.salary_service.calculate(employee_code, period, variable_earnings)
         pf = self.pf_service.calculate_for_salary(employee, period, salary)
         esic = self.esic_service.calculate_for_salary(employee, period, salary)
         pt = self.pt_service.calculate_for_salary(employee, period, salary)
@@ -134,6 +148,12 @@ class PayrollCalculationService:
             *salary.warnings, *pf.warnings, *esic.warnings, *pt.warnings, *lwf.warnings,
             *tds.warnings, *summary.warnings,
         ]  # fmt: skip
+        attendance = self.salary_service.attendance
+        if attendance.lop_record(employee.id, period) is None:
+            pending = sum((e.days for e in attendance.exceptions(employee.id, period)), Decimal(0))
+            if pending:
+                warnings.insert(0, f"{pending} absent day(s) without approved leave in {period}: "
+                                   "no LOP applied until HR decides")  # fmt: skip
         for name, result in (("PT", pt), ("LWF", lwf), ("TDS", tds)):
             if result.applicable and not result.configured:
                 where = getattr(result, "state_code", None)
@@ -152,4 +172,5 @@ class PayrollCalculationService:
             summary=summary,
             pending_components=list(PENDING_COMPONENTS),
             warnings=list(dict.fromkeys(warnings)),
+            adjustments=detail,
         )
