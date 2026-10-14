@@ -54,6 +54,7 @@ if (Test-Url "http://127.0.0.1:8000/health") {
     Write-Host "[2/3] API already running"
 } else {
     Write-Host "[2/3] Starting API window..."
+    & "$root\.venv\Scripts\payroll-chatbot.exe" db upgrade | Out-Null  # apply new migrations first
     Start-Process powershell -ArgumentList "-NoExit", "-Command",
         "`$host.UI.RawUI.WindowTitle = 'Payroll API (keep open)'; Set-Location '$root'; .\.venv\Scripts\payroll-chatbot.exe api serve"
     if (-not (Wait-Url "http://127.0.0.1:8000/health" 60 "API")) { exit 1 }

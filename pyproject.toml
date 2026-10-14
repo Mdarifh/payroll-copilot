@@ -1,7 +1,7 @@
 [project]
 name = "payroll-chatbot"
 version = "0.1.0"
-description = "Payroll chatbot for an Indian company: deterministic payroll engine + LLM tool calling"
+description = "Payroll chatbot for an Indian company: deterministic payroll engine + LangGraph / LangChain agent with RAG"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,11 +16,17 @@ dependencies = [
     "python-multipart>=0.0.9",  # login form for the Swagger "Authorize" button
     "pyjwt>=2.9",
     "bcrypt>=4.2",
-    # LLM (Ollama over HTTP, Phase 2)
     "httpx>=0.27",
-    "anthropic>=1.0",
     "fpdf2>=2.8",
     "openpyxl>=3.1",
+    # AI: LangGraph chat graph, LangChain models / tools / retriever (RAG)
+    "anthropic>=1.0",
+    "langchain-core>=1.6",
+    "langgraph>=1.2",
+    "langgraph-checkpoint-sqlite>=3.1",  # paused payroll runs survive a restart
+    "langchain-ollama>=1.1",
+    "langchain-anthropic>=1.7",
+    "langchain-text-splitters>=1.1",
 ]
 
 [project.scripts]

@@ -20,7 +20,25 @@ const STATUS: Record<string, { label: string; cell: string; dot: string }> = {
   HOLIDAY: { label: "Holiday", cell: "bg-violet-50 text-violet-800", dot: "bg-violet-500" },
   WEEK_OFF: { label: "Week off", cell: "bg-slate-100 text-slate-500", dot: "bg-slate-400" },
 };
+// a day of the month with no attendance record (not entered yet, or still to come)
+const NOT_MARKED = { label: "Not marked", cell: "border border-dashed border-slate-300 bg-white text-slate-400", dot: "bg-transparent" };
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** every day of the month ("2026-10"), with the recorded attendance where there is one */
+function monthDays(month: string, recorded: AttendanceDay[]): AttendanceDay[] {
+  const [y, m] = month.split("-").map(Number);
+  const byDate = new Map(recorded.map((d) => [d.date, d]));
+  const count = new Date(y, m, 0).getDate();
+  return Array.from({ length: count }, (_, i) => {
+    const date = `${month}-${String(i + 1).padStart(2, "0")}`;
+    return byDate.get(date) ?? { date, status: "NOT_MARKED", remarks: null, lop_days: "0" };
+  });
+}
+
+function localToday(): string {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+}
 
 function Tile({ label, value, tone = "text-slate-900", hint }: {
   label: string; value: string; tone?: string; hint?: string;
@@ -34,8 +52,13 @@ function Tile({ label, value, tone = "text-slate-900", hint }: {
   );
 }
 
-function Calendar({ days, onDay }: { days: AttendanceDay[]; onDay?: (d: AttendanceDay) => void }) {
-  if (!days.length) return null;
+function Calendar({ month, recorded, onDay }: {
+  month: string; recorded: AttendanceDay[]; onDay?: (d: AttendanceDay) => void;
+}) {
+  const days = monthDays(month, recorded);
+  const today = localToday();
+  const missing = days.filter((d) => d.status === "NOT_MARKED" && d.date <= today).length;
+  const upcoming = days.filter((d) => d.date > today).length;
   // Monday-first grid: blank cells before the first day of the month
   const lead = (new Date(`${days[0].date}T00:00:00`).getDay() + 6) % 7;
   return (
@@ -46,12 +69,14 @@ function Calendar({ days, onDay }: { days: AttendanceDay[]; onDay?: (d: Attendan
       <div className="mt-1.5 grid grid-cols-7 gap-1.5">
         {Array.from({ length: lead }, (_, i) => <span key={`b${i}`} />)}
         {days.map((d) => {
-          const s = STATUS[d.status] ?? STATUS.WEEK_OFF;
+          const s = d.status === "NOT_MARKED" ? NOT_MARKED : STATUS[d.status] ?? STATUS.WEEK_OFF;
           const lop = Number(d.lop_days) > 0;
+          const future = d.date > today;
+          const editable = !!onDay && !future; // attendance of days still to come is not entered
           return (
-            <button type="button" key={d.date} disabled={!onDay} onClick={() => onDay?.(d)}
-              title={`${d.date} · ${s.label}${lop ? ` · LOP ${formatDays(d.lop_days)}` : ""}${d.remarks ? ` · ${d.remarks}` : ""}${onDay ? " · click to edit" : ""}`}
-              className={`relative flex h-11 flex-col items-center justify-center rounded-lg text-xs font-medium ${s.cell} ${lop ? "ring-2 ring-rose-400" : ""} ${onDay ? "cursor-pointer hover:ring-2 hover:ring-indigo-400" : "cursor-default"}`}>
+            <button type="button" key={d.date} disabled={!editable} onClick={() => onDay?.(d)}
+              title={`${d.date} · ${future ? "Upcoming" : s.label}${lop ? ` · LOP ${formatDays(d.lop_days)}` : ""}${d.remarks ? ` · ${d.remarks}` : ""}${editable ? " · click to edit" : ""}`}
+              className={`relative flex h-11 flex-col items-center justify-center rounded-lg text-xs font-medium ${s.cell} ${future ? "opacity-50" : ""} ${lop ? "ring-2 ring-rose-400" : ""} ${editable ? "cursor-pointer hover:ring-2 hover:ring-indigo-400" : "cursor-default"}`}>
               {Number(d.date.slice(8))}
               <span className={`mt-0.5 h-1.5 w-1.5 rounded-full ${s.dot}`} />
               {lop && <span className="absolute right-0.5 top-0.5 rounded bg-rose-500 px-1 text-[8px] font-bold text-white">LOP</span>}
@@ -64,7 +89,14 @@ function Calendar({ days, onDay }: { days: AttendanceDay[]; onDay?: (d: Attendan
           <span key={s.label} className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${s.dot}`} />{s.label}</span>
         ))}
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded ring-2 ring-rose-400" />LOP day</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded border border-dashed border-slate-400" />Not marked</span>
       </div>
+      {(missing > 0 || upcoming > 0) && (
+        <p className="mt-2 text-[11px] text-slate-500">
+          {missing > 0 && <>{missing} day(s) up to today have no attendance yet - click a day to mark it, or use "Add missing days". </>}
+          {upcoming > 0 && <>{upcoming} upcoming day(s) are shown faded.</>}
+        </p>
+      )}
     </div>
   );
 }
@@ -202,7 +234,7 @@ export function AttendanceTab({ token, code, month, onExpired, canEdit = false, 
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="space-y-2 lg:col-span-3">
-          <Calendar days={data.days!} onDay={canEdit ? (d) => setDayEdit({ date: d.date, status: d.status === "LEAVE" ? "PRESENT" : d.status, remarks: d.remarks }) : undefined} />
+          <Calendar month={data.month} recorded={data.days!} onDay={canEdit ? (d) => setDayEdit({ date: d.date, status: d.status === "LEAVE" || d.status === "NOT_MARKED" ? "PRESENT" : d.status, remarks: d.remarks }) : undefined} />
           {canEdit && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
               <span>Click a day to correct its attendance.</span>

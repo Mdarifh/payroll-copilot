@@ -162,9 +162,9 @@ def months(_: Employee = Depends(require_hr),
 
 
 @runs_router.get("/{month}", summary="One month: totals and every batch with its stage")
-def month(month: str, _: Employee = Depends(require_hr),
+def month(month: str, hr: Employee = Depends(require_hr),
           session: Session = Depends(get_session)) -> dict[str, Any]:  # fmt: skip
-    return payroll_runs.month_detail(session, parse_month(month))
+    return payroll_runs.month_detail(session, parse_month(month), hr)
 
 
 class RecalculateRequest(BaseModel):

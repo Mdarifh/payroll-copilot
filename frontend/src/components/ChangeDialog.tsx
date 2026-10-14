@@ -57,7 +57,9 @@ export function ChangeDialog({ token, kind, employeeCode, employeeName, month, i
   const [attDate, setAttDate] = useState(initial?.attendance?.[0]?.date ?? lastDay);
   const [attStatus, setAttStatus] = useState(initial?.attendance?.[0]?.status ?? "PRESENT");
   const [attRemarks, setAttRemarks] = useState(initial?.attendance?.[0]?.remarks ?? "");
-  const [withLop, setWithLop] = useState(initial?.lop_days != null && kind === "attendance");
+  // an absence normally means loss of pay: on by default, HR can untick it (e.g. a late
+  // leave application is expected)
+  const [withLop, setWithLop] = useState(kind === "attendance");
   const [preview, setPreview] = useState<ChangePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,6 +191,11 @@ export function ChangeDialog({ token, kind, employeeCode, employeeName, month, i
                       <input type="checkbox" checked={withLop} onChange={(e) => setWithLop(e.target.checked)} />
                       Also apply LOP for this day (LOP {formatDays(currentLop ?? "0")} → {formatDays(String(Number(currentLop ?? 0) + (attStatus === "ABSENT" ? 1 : 0.5)))} days)
                     </label>
+                  )}
+                  {(attStatus === "ABSENT" || attStatus === "HALF_DAY") && !withLop && (
+                    <p className="col-span-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                      Net pay will not change: the day is marked {attStatus === "ABSENT" ? "absent" : "half day"} but LOP stays {formatDays(currentLop ?? "0")} day(s).
+                    </p>
                   )}
                   <p className="col-span-2 text-[11px] text-slate-400">Leave days come from approved leave applications. Marking a day absent does not cut pay unless LOP is applied.</p>
                 </div>

@@ -12,7 +12,7 @@ def test_tool_sets_per_role():
     employee = {t.name for t in tools_for(Role.EMPLOYEE)}
     hr = {t.name for t in tools_for(Role.HR)}
     assert employee == {"get_payslip", "get_leave_balance", "get_tax_summary", "explain_my_pay",
-                        "compare_my_months", "payroll_rules"}
+                        "compare_my_months", "payroll_rules", "search_policy_documents"}
     assert hr == employee | {"get_attendance_exceptions", "start_payroll_review",
                              "find_employee", "explain_employee_pay", "compare_employee_months"}
 

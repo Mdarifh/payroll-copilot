@@ -28,7 +28,8 @@ READ, WRITE, PENDING, NONE = "READ", "WRITE", "PENDING", "NONE"
 READ_INTENTS = ("employee_lookup", "salary_lookup", "payroll_lookup", "attendance_lookup",
                 "payslip_lookup", "payroll_explanation", "payroll_comparison",
                 "compliance_question", "payroll_audit", "anomaly_detection",
-                "root_cause_analysis")  # fmt: skip
+                "root_cause_analysis", "leave_balance", "tax_summary", "my_leave_requests",
+                "leave_approvals", "pending_actions")  # fmt: skip
 WRITE_INTENTS = ("update_salary", "update_lop", "add_overtime", "add_miscellaneous", "add_bonus",
                  "update_attendance", "update_salary_structure", "generate_payslip",
                  "publish_payslip", "run_payroll")  # fmt: skip
@@ -36,7 +37,9 @@ WRITE_INTENTS = ("update_salary", "update_lop", "add_overtime", "add_miscellaneo
 _MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m} | {
     m.lower(): i for i, m in enumerate(calendar.month_abbr) if m} | {"sept": 9}
 _MONTH_RE = re.compile(r"\b(" + "|".join(sorted(_MONTHS, key=len, reverse=True))
-                       + r")\b\.?,?\s*(\d{4})?", re.IGNORECASE)  # fmt: skip
+                       # Nov 2026, Nov, 2026, nov-2026, aug/2026, nov-26, nov'26
+                       + r")\b(?:[\s.,/-]*(\d{4})\b|['’-](\d{2})\b)?",
+                       re.IGNORECASE)  # fmt: skip
 _YM_RE = re.compile(r"\b(\d{4})[-/](\d{1,2})\b")
 _CODE_RE = re.compile(r"\b([A-Za-z]{2,4}-\d{2,5})\b")
 _NUM = r"(\d+(?:\.\d+)?)"
@@ -202,7 +205,8 @@ def extract_months(text: str, today: date) -> list[PayrollPeriod]:
         with suppress(PeriodError):
             found.append((m.start(), parse_month(m.group(0))))
     for m in _MONTH_RE.finditer(text):
-        name, year = m.group(1).lower(), m.group(2)
+        name = m.group(1).lower()
+        year = m.group(2) or (m.group(3) and f"20{m.group(3)}")
         if name == "may" and not year and not re.search(r"\bmay\s+(?:mein|me|ka|ki)\b|\bmay\b$",
                                                         text, re.IGNORECASE):  # fmt: skip
             continue  # "may" is usually the English verb
@@ -302,8 +306,32 @@ def route(session: Session, user: Employee, message: str, today: date) -> Route:
         r.intent, r.kind = intent, kind
         return r
 
-    # ---- leave application and tax help ---------------------------------------------------
+    # ---- leave: requests to decide / my requests / balance ---------------------------------
     leave_word = re.search(r"\b(leaves?|chh?utt?i|chhuti|cl|sl|el)\b", low)
+    process_question = re.search(r"\b(how|kaise|process|policy|rules?|steps|kya hota)\b", low)
+    # "who approves leave?" is a policy question, not a request to see the approvals
+    who_question = re.search(r"\b(who|kaun|why|kyun|what is|kya hai)\b", low)
+    mine = re.search(r"\b(my|mine|mera|meri|mere|apni|apna)\b", low)
+    if leave_word and not process_question and not r.employee_error:
+        if re.search(r"\b(cancel\w*|withdraw\w*)\b", low) or (mine and re.search(
+                r"\b(status|pending|approved?|rejected|requests)\b", low)):  # fmt: skip
+            if re.search(r"\b(cancel|withdraw)", low):
+                r.flags.add("cancel")
+            return set_("my_leave_requests", READ)
+        if not who_question and re.search(
+                r"\b(pending|approv\w*|reject\w*|requests|to.?decide|manzoor)\b", low):
+            return set_("leave_approvals", READ)
+        if not r.employee and re.search(r"\bbalance\b|\bkitn\w* (leaves?|chh?utt?i)|"
+                                        r"\b(leaves?|chh?utt?i\w*) (left|remaining|baki|bachi)",
+                                        low):  # fmt: skip
+            return set_("leave_balance", READ)
+    # ---- payroll changes waiting for approval (maker-checker) --------------------------------
+    if not leave_word and re.search(
+            r"\b(pending|waiting)\b.{0,30}\b(approvals?|actions?|changes?|requests?)\b|"
+            r"\bapprovals?\b.{0,20}\b(pending|dikhao|show|list|batao)\b|\baction cent", low):
+        return set_("pending_actions", READ)
+
+    # ---- leave application and tax help ---------------------------------------------------
     if leave_word and not re.search(
             r"\b(how|kaise|process|policy|rules?|steps|balance|kitn\w*|mark\w*|absent|"
             r"present|attendance)\b|\?", low):  # fmt: skip
@@ -321,10 +349,20 @@ def route(session: Session, user: Employee, message: str, today: date) -> Route:
         return set_("tax_help", READ)
 
     # ---- write intents (preview only) -------------------------------------------------
-    if re.search(r"\b(run|process|chalao|chala ?do|start)\b.*\bpayroll\b|"
-                 r"\bpayroll\b.*\b(run|process|chalao|chala ?do|review|start)\b", low) and not (
-            re.search(r"\baudit\b|\b(how|kaise|steps|process|procedure|sop)\b", low)):
+    run_words = r"run|process|chalao|chala ?do|start"
+    if re.search(rf"\b({run_words})\b.*\bpayroll\b|\bpayroll\b.*\b({run_words}|review)\b",
+                 low) and not (
+            re.search(r"\baudit\b|\b(how|kaise|steps|procedure|sop|kya hai|what is|explain|"
+                      r"samjhao|policy)\b", low)) and (  # fmt: skip
+            # "process" alone is the noun ("payroll process"), unless asked to do it
+            re.search(r"\b(run|chalao|chala ?do|start|review)\b", low) or r.month
+            or re.search(r"\b(karo|kar ?do|kijiye|karna|please|now|all|sab)\b", low)):
         # "run AI payroll audit" is an audit; "how to run payroll" is a process question
+        # named employees (codes, even unknown ones, or a name) run only them, never everyone
+        codes = [c.upper() for c in _CODE_RE.findall(text)]
+        named = list(dict.fromkeys(([r.employee] if r.employee else []) + codes))
+        if named:
+            r.extra = {"employees": named}
         return set_("run_payroll", WRITE)
     if re.search(r"\b(publish|release|send|bhej)\b.*\bpayslips?\b", low):
         return set_("publish_payslip", PENDING)
@@ -333,7 +371,9 @@ def route(session: Session, user: Employee, message: str, today: date) -> Route:
     r.attendance = extract_attendance(text, today)
     if r.attendance and (write or re.search(r"\bmark\w*\b", low)):
         r.months = [PayrollPeriod.parse(r.attendance[0]["date"][:7])]
-        if re.search(r"\blop\b", low):
+        # an absence means loss of pay unless HR says otherwise ("without LOP", "LOP mat")
+        if not re.search(r"\b(without|no|bina)\s+lop\b|\blop\s+(mat|nahi|na)\b|"
+                         r"\bno\s+loss of pay\b", low):  # fmt: skip
             r.flags.add("with_lop")
         return set_("update_attendance", WRITE)
     if write and not asks or (write and (r.hours or r.days or r.amount)):
@@ -383,8 +423,7 @@ def route(session: Session, user: Employee, message: str, today: date) -> Route:
                 and re.search(r"\b(what is|kya hai|explain|samjhao|meaning|matlab)\b", low))):
         return set_("compliance_question", READ)
     # a component question about someone, or "how / how much" about one's own pay
-    # (plain "show my payslip" style questions stay with the LLM tools)
-    how = re.search(r"\b(explain|samjhao|how|kaise|calculate|working|why|kyun|kitna|kitni)\b",
+    how =re.search(r"\b(explain|samjhao|how|kaise|calculate|working|why|kyun|kitna|kitni)\b",
                     low)  # fmt: skip
     if r.component and (r.employee or how) and (r.component != "NET" or r.employee or asks):
         return set_("payroll_explanation", READ)
@@ -393,8 +432,14 @@ def route(session: Session, user: Employee, message: str, today: date) -> Route:
         return set_("salary_lookup", READ)
     if re.search(r"\b(attendance|absent|present|leave days|haaziri|hazri)\b", low) and r.employee:
         return set_("attendance_lookup", READ)
-    if re.search(r"\bpayslip|salary slip|pay slip\b", low) and r.employee:
-        return set_("payslip_lookup", READ)
+    if re.search(r"\bpayslip|salary slip|pay slip\b", low) and (r.employee or not re.search(
+            r"\b(how|kaise|why|kyun|when|kab|policy)\b", low)):  # fmt: skip
+        return set_("payslip_lookup", READ)  # no employee = the user's own
+    if not r.employee and re.search(
+            r"\btax summary\b|\b(my|mera|meri|mere)\s+(income\s+)?(tax|tds)\b|"
+            r"\b(tax|tds)\b.{0,15}\b(kitna|kitni|how much)\b|"
+            r"\b(kitna|kitni|how much)\b.{0,15}\b(tax|tds)\b", low):  # fmt: skip
+        return set_("tax_summary", READ)
     if r.employee and re.search(r"\b(who|kaun|details?|profile|info|about|employee)\b", low):
         return set_("employee_lookup", READ)
     if r.employee and re.search(r"\b(salary|pay|tankhwah)\b", low):

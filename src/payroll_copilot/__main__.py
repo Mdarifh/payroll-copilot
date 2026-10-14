@@ -52,6 +52,8 @@ def _kb_ingest() -> int:
         result = ingest(session)
     print(f"Knowledge base: added {result['added']}, updated {result['updated']}, "
           f"unchanged {result['unchanged']}, removed {result['removed']}")
+    if "embedded" in result:
+        print(f"  semantic search: {result['embedded']} passages embedded")
     for error in result["errors"]:
         print(f"  skipped: {error}")
     return 0

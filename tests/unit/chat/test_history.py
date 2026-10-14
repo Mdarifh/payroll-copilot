@@ -74,7 +74,7 @@ def test_history_is_saved_per_user_and_survives_a_restart(seeded_engine, make_se
     assert saved["items"][3]["messages"][1]["type"] == "explain_card"  # cards are kept
     restarted.post("/chat", json={"message": "thanks", "conversation_id": conv}, headers=rahul)
     history = model.calls[0]["history"]
-    assert {"role": "user", "content": "hi there"} in history  # memory rebuilt from the DB
+    assert ("human", "hi there") in [(m.type, m.content) for m in history]  # rebuilt from the DB
 
     priya = auth(restarted, "priya.nair@example.com", "Employee@123")
     assert restarted.get(f"/chat/sessions/{conv}", headers=priya).status_code == 404

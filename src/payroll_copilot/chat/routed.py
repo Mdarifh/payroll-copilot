@@ -236,15 +236,119 @@ def _payslip(ctx: ToolContext, r: Route) -> Routed:
     month = r.month or _latest_month(ctx, employee)
     run = ctx.session.scalar(select(PayrollRun).where(PayrollRun.employee_id == employee.id,
                                                       PayrollRun.period == str(month)))
+    own = employee.id == ctx.user.id
     if run is None:
-        return Routed(f"Payroll for {employee.full_name} in {month.label} is not processed yet.")
+        return Routed(f"Payroll for {'you' if own else employee.full_name} in {month.label} is "
+                      "not processed yet - payslips come after HR runs payroll for the month.")
     slip = run.payslip
-    text = (f"{employee.full_name}'s {month.label} payslip: gross {_inr(slip['gross_earnings'])},"
-            f" deductions {_inr(slip['total_deductions'])}, net pay {_inr(slip['net_pay'])}.")
+    whose = "Your" if own else f"{employee.full_name}'s"
+    text = (f"{whose} {month.label} payslip: gross {_inr(slip['gross_earnings'])}, "
+            f"deductions {_inr(slip['total_deductions'])}, net pay {_inr(slip['net_pay'])}.")
     # the PDF link serves the logged-in user's own payslip only
     card = {"type": "payslip_card", "payslip": slip,
-            "download_url": f"/payslips/{run.period}/pdf" if employee.id == ctx.user.id else None}
+            "download_url": f"/payslips/{run.period}/pdf" if own else None}
     return Routed(text, {"net_pay": slip["net_pay"]}, [card], tool="employee_payslip")
+
+
+def _days(value: Any) -> str:
+    return f"{Decimal(str(value)).normalize():f}"
+
+
+def _leave_balance(ctx: ToolContext, r: Route) -> Routed:
+    from payroll_copilot.services import leave_requests as leaves
+
+    data = leaves.mine(ctx.session, ctx.user, ctx.today)
+    parts = [f"{b['label']} {_days(b['available'])}" for b in data["balances"]]
+    pending = [q for q in data["requests"] if q["status"] == "PENDING"]
+    text = f"Your leave balance for FY {data['financial_year']}: {', '.join(parts)} day(s) left."
+    if pending:
+        text += f" {len(pending)} request(s) waiting for approval."
+    card = {"type": "info_card", "title": f"Leave balance · FY {data['financial_year']}",
+            "subtitle": "Available days (entitlement - taken - pending)",
+            "fields": [{"label": b["label"], "value": _days(b["available"]),
+                        "hint": f"{_days(b['taken'])} taken · {_days(b['pending'])} pending · "
+                                f"{_days(b['entitlement'])} a year"} for b in data["balances"]],
+            "link": {"page": "leave", "label": "Open Leave"}}  # fmt: skip
+    return Routed(text, {}, [card], tool="leave_balance")
+
+
+def _tax_summary(ctx: ToolContext, r: Route) -> Routed:
+    from payroll_copilot.chat.tools import ToolError, run_tool
+
+    try:
+        t = run_tool(ctx, "get_tax_summary", {}).content
+    except ToolError as exc:
+        return Routed(f"{exc}")
+    text = (f"Your projected income tax for FY {t['financial_year']} ({t['regime'].lower()} "
+            f"regime) is {_inr(t['total_annual_tax'])} on a taxable income of "
+            f"{_inr(t['taxable_income'])}. TDS deducted so far: "
+            f"{_inr(t['tds_deducted_in_processed_payslips'])}; monthly TDS from now: "
+            f"{_inr(t['monthly_tds_from_now'])}. {t['note']}")
+    fields = [("Projected annual salary", t["projected_annual_salary"]),
+              ("Standard deduction", t["standard_deduction"]),
+              ("Taxable income", t["taxable_income"]), ("Rebate", t["rebate"]),
+              ("Total tax for the year", t["total_annual_tax"]),
+              ("TDS deducted so far", t["tds_deducted_in_processed_payslips"]),
+              ("Monthly TDS from now", t["monthly_tds_from_now"])]
+    card = {"type": "info_card", "title": f"Tax summary · FY {t['financial_year']}",
+            "subtitle": f"{t['regime'].title()} regime · based on {t['based_on_month']}",
+            "fields": [{"label": k, "value": _inr(v)} for k, v in fields]}  # fmt: skip
+    return Routed(text, {}, [card], tool="get_tax_summary")
+
+
+# ---------------------------------------------------------------------- leave + approvals
+
+
+def _my_leave_requests(ctx: ToolContext, r: Route) -> Routed:
+    from payroll_copilot.services import leave_requests as leaves
+
+    rows = leaves.mine(ctx.session, ctx.user, ctx.today)["requests"][:10]
+    pending = [q for q in rows if q["status"] == "PENDING"]
+    if not rows:
+        return Routed("You have no leave requests yet. To apply, say e.g. 'CL on 20 Oct'.")
+    if "cancel" in r.flags:
+        text = ("Press Cancel on the request you want to withdraw." if pending else
+                "None of your requests is pending - only a pending request can be withdrawn.")
+    else:
+        counts = Counter(q["status"].lower() for q in rows)
+        text = "Your recent leave requests: " + ", ".join(f"{n} {s}" for s, n in counts.items())
+        text += "." + (" Pending ones can be withdrawn from the card." if pending else "")
+    return Routed(text, {}, [{"type": "leave_list_card", "mode": "mine", "items": rows}],
+                  tool="my_leave_requests")  # fmt: skip
+
+
+def _leave_approvals(ctx: ToolContext, r: Route) -> Routed:
+    from payroll_copilot.services import leave_requests as leaves
+
+    rows = leaves.to_decide(ctx.session, ctx.user)
+    if r.employee:  # "Rahul ki leave approve karo": only that employee's requests
+        rows = [q for q in rows if q["employee_code"] == r.employee]
+    if not rows:
+        return Routed("No leave requests are waiting for your decision"
+                      + (f" from {r.employee}." if r.employee else "."))
+    text = (f"{len(rows)} leave request(s) waiting for your decision. Approve or reject them in "
+            "the card (rejecting needs a short note).")
+    return Routed(text, {}, [{"type": "leave_list_card", "mode": "approve", "items": rows[:20]}],
+                  tool="leave_approvals")  # fmt: skip
+
+
+def _pending_actions(ctx: ToolContext, r: Route) -> Routed:
+    from payroll_copilot.services import action_center
+
+    if not is_staff(ctx.user):
+        return Routed("Only HR can see payroll changes waiting for approval.")
+    page = action_center.list_actions(ctx.session, "PENDING_APPROVAL", page_size=10)
+    items = page["items"]
+    if not items:
+        return Routed("No payroll changes are waiting for approval.")
+    yours = sum(i["requested_by_code"] == ctx.user.employee_code for i in items)
+    text = f"{page['total']} payroll change(s) waiting for approval."
+    if yours:
+        text += (f" {yours} of them {'is' if yours == 1 else 'are'} yours - another HR user must "
+                 "approve those (maker-checker); you can only withdraw them.")
+    card = {"type": "action_list_card", "items": items, "total": page["total"],
+            "me": ctx.user.employee_code, "can_approve": has(ctx.user, Perm.APPROVE)}
+    return Routed(text, {}, [card], tool="pending_actions")
 
 
 # ---------------------------------------------------------------------- writes (preview)
@@ -300,8 +404,12 @@ def _preview(ctx: ToolContext, r: Route) -> Routed:
             per_day = Decimal("0.5") if r.attendance[0]["status"] == "HALF_DAY" else Decimal(1)
             change["lop_days"] = (current.days if current else ZERO) + per_day * len(r.attendance)
             title += f" with LOP {change['lop_days']} days"
+            assumptions.append("LOP is applied for the absence - say 'without LOP' to only "
+                               "mark the day")  # fmt: skip
+        elif r.attendance[0]["status"] in ("ABSENT", "HALF_DAY"):
+            assumptions.append("LOP not changed (asked without LOP): net pay stays the same")
         else:
-            assumptions.append("LOP not changed (add 'with LOP' / 'LOP bhi' to apply LOP)")
+            assumptions.append("LOP not changed")
     elif r.intent == "update_salary":
         gross = r.amount
         if "annual" in r.flags:
@@ -445,12 +553,51 @@ def _latest_processed_month(ctx: ToolContext) -> PayrollPeriod:
     return PayrollPeriod.parse(period) if period else PayrollPeriod.from_date(ctx.today)
 
 
+def _run_selected(ctx: ToolContext, month: PayrollPeriod, codes: list[str]) -> Routed:
+    from payroll_copilot.chat.tools import ToolError, selected_run
+
+    try:
+        result = selected_run(ctx, month, codes)
+    except ToolError as exc:
+        return Routed(f"I can't run payroll for that: {exc}.")
+    info = result.content
+    who = ", ".join(info["employees"])
+    text = f"Payroll {info['label']} only for {who} - nobody else's payslip changes. "
+    if info["finalized_locked"]:
+        text += (f"Finalized (locked) for {', '.join(info['finalized_locked'])}: reopen the "
+                 "month on Payroll Runs first. ")
+    else:
+        text += "Check LOP, give a reason and press Review & run in the card. Nothing has run yet. "
+    if info["skipped_unknown_or_not_employed"]:
+        text += (f"Left out (unknown or not employed in {info['label']}): "
+                 f"{', '.join(info['skipped_unknown_or_not_employed'])}.")
+    return Routed(text.strip(), {"month": info["month"], "employees": info["employees"]},
+                  result.cards, tool="run_selected")  # fmt: skip
+
+
 def _run_payroll(ctx: ToolContext, r: Route) -> Routed:
     from payroll_copilot.services.payroll_runs import prechecks
 
     if not has(ctx.user, Perm.RUN_PAYROLL):
         return Routed("Only HR can run payroll.")
     month = r.month or PayrollPeriod.from_date(ctx.today)
+    if r.extra.get("employees"):  # only the named employees: never the company-wide run
+        return _run_selected(ctx, month, r.extra["employees"])
+    if ctx.payroll_flow is not None:  # LangGraph run: pre-checks -> LOP review -> approval
+        from payroll_copilot.chat.tools import flow_summary
+
+        card = ctx.payroll_flow.start(ctx.user, month)
+        info = flow_summary(card)
+        pc = card["prechecks"]
+        if card["blockers"]:
+            text = (f"Pre-checks for {pc['label']} found problems that block the run: "
+                    + "; ".join(f"{b['check']} ({b['count']} failed)" for b in card["blockers"])
+                    + ". Fix them, then press Re-check in the card.")  # fmt: skip
+        else:
+            text = (f"Pre-checks for {pc['label']} passed for {info['employees']} employees. "
+                    "Review LOP in the card and press Approve & run - payroll is not processed "
+                    "before that.")  # fmt: skip
+        return Routed(text, info, [card], tool="payroll_flow")
     pc = prechecks(ctx.session, month)
     s = pc["summary"]
     text = (f"Pre-checks for {pc['label']}: {pc['employees']} employees, {s['passed']} checks "
@@ -474,10 +621,10 @@ def _knowledge(ctx: ToolContext, r: Route) -> Routed:
     a = answer(ctx.session, ctx.user, r.text, ctx.today)
     if not a["found"]:
         return Routed(a["text"], tool="knowledge_search")
+    from payroll_copilot.chat.tools import KNOWLEDGE_PASSAGE_KEYS
+
     card = {"type": "knowledge_card", "question": r.text, "passages": [
-        {k: p[k] for k in ("title", "section", "snippet", "source", "status", "jurisdiction",
-                           "effective_from", "effective_to", "document_id")}
-        for p in a["passages"]]}  # fmt: skip
+        {k: p[k] for k in KNOWLEDGE_PASSAGE_KEYS} for p in a["passages"]]}
     return Routed(a["text"], {}, [card], tool="knowledge_search")
 
 
@@ -560,6 +707,9 @@ READERS = {
     "compliance_question": _rules, "salary_lookup": _salary, "payroll_lookup": _salary,
     "attendance_lookup": _attendance, "employee_lookup": _profile, "payslip_lookup": _payslip,
     "knowledge_question": _knowledge, "tax_help": _tax_help,
+    "leave_balance": _leave_balance, "tax_summary": _tax_summary,
+    "my_leave_requests": _my_leave_requests, "leave_approvals": _leave_approvals,
+    "pending_actions": _pending_actions,
 }
 
 

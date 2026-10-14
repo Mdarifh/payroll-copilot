@@ -146,11 +146,13 @@ def start_review(
                 continue
             session.add(BatchItem(batch_pk=batch.id, employee_id=row.id))
             days = absences.get(row.id, [])
-            if not days or row.id in decided:  # no exceptions, or HR already decided LOP
+            absent = sum((d for _, d in days), ZERO)
+            # no exceptions, or HR's LOP decision already covers every absence (an absence
+            # marked after the decision brings the employee back to the review)
+            if not days or decided.get(row.id, ZERO) >= absent:
                 ok += 1
                 continue
             review += 1
-            absent = sum((d for _, d in days), ZERO)
             base, divisor, per_day = _per_day(session, row.id, period)
             session.add(BatchLopItem(
                 batch_pk=batch.id, employee_id=row.id,

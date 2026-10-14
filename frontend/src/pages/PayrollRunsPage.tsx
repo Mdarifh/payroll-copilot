@@ -315,8 +315,9 @@ export function PayrollRunsPage({ token, onExpired }: { token: string; onExpired
                     </button>
                   )}
                   {latest.stage === "VALIDATED" && can("approve") && (
-                    <button type="button" onClick={() => setDialog("approve")}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700">
+                    <button type="button" onClick={() => setDialog("approve")} disabled={!latest.can_approve}
+                      title={latest.approve_blocked_reason ?? undefined}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">
                       <BadgeCheck className="h-4 w-4" />Approve
                     </button>
                   )}
@@ -448,15 +449,18 @@ export function PayrollRunsPage({ token, onExpired }: { token: string; onExpired
       )}
       {dialog === "approve" && latest && (
         <ConfirmDialog title="Approve payroll" confirmLabel="Approve" tone="indigo"
-          facts={[{ label: "Month", value: detail!.label }, { label: "Payslips", value: latest.done }, { label: "Net pay", value: formatINR(detail!.net) },
+          facts={[{ label: "Month", value: detail!.label }, { label: "Payslips in this run", value: latest.done },
+            { label: "Net pay of this run", value: formatINR(latest.batch_net) },
+            ...(detail!.employees !== latest.done ? [{ label: "Month total (all runs)", value: `${formatINR(detail!.net)} · ${detail!.employees} employees` }] : []),
             { label: "Prepared by", value: latest.created_by ?? "—" }]}
           warning="Maker-checker: the HR user who started this payroll cannot approve it."
+          blocked={latest.approve_blocked_reason}
           onClose={() => setDialog(null)}
           onConfirm={async () => { await approveBatch(token, latest.batch_id); await after("Payroll approved"); }} />
       )}
       {dialog === "finalize" && latest && (
         <ConfirmDialog title="Finalize payroll" confirmLabel="Finalize and lock" tone="emerald"
-          facts={[{ label: "Month", value: detail!.label }, { label: "Payslips to lock", value: latest.done }, { label: "Net pay", value: formatINR(detail!.net) }]}
+          facts={[{ label: "Month", value: detail!.label }, { label: "Payslips to lock", value: latest.done }, { label: "Net pay of this run", value: formatINR(latest.batch_net) }]}
           warning="Finalizing locks these payslips. A locked month cannot be recalculated or rolled back."
           onClose={() => setDialog(null)}
           onConfirm={async () => { await finalizeBatch(token, latest.batch_id); await after("Payroll finalized and locked"); }} />

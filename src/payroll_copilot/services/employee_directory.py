@@ -233,10 +233,25 @@ def salary_details(session: Session, actor: Employee, code: str,
     monthly_gross = current.monthly_gross
     revisions = [{"effective_from": a.effective_from.isoformat(),
                   "monthly_gross": str(a.monthly_gross)} for a in assignments]  # fmt: skip
+    # a revision after this month (e.g. approved today, effective next month): the screen
+    # of an older month says so, otherwise the new salary seems "not applied"
+    next_from = session.scalar(select(func.min(SalaryStructure.effective_from)).where(
+        SalaryStructure.employee_id == employee.id, SalaryStructure.effective_from > month.end))
+    next_revision = None
+    if next_from is not None:
+        upcoming = SalaryRepository(session).assignments_between(employee.id, next_from,
+                                                                 next_from)  # fmt: skip
+        if upcoming:
+            next_month = PayrollPeriod.from_date(next_from)
+            next_revision = {"effective_from": next_from.isoformat(),
+                             "monthly_gross": str(upcoming[-1].monthly_gross),
+                             "month": str(next_month), "month_label": next_month.label,
+                             "viewable": next_month <= latest}  # fmt: skip
     return {
         **base, "restricted": False,
         "effective_from": current.effective_from.isoformat(),
         "revised_in_month": len(assignments) > 1, "revisions": revisions,
+        "next_revision": next_revision,
         "monthly_gross": str(monthly_gross), "annual_gross": str(monthly_gross * 12),
         "net_pay": _net_pay(session, employee, month),
         "earnings": {"rows": earnings,

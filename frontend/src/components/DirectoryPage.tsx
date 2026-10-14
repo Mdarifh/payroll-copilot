@@ -244,6 +244,20 @@ function Details({ token, code, onOpenStructure, onExpired, canEdit }: {
               The latest structure is shown.
             </p>
           )}
+          {data.next_revision && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+              <span>
+                Salary revised to <b>{formatINR(data.next_revision.monthly_gross)}</b> gross from{" "}
+                {data.next_revision.effective_from}. {data.month_label} still shows the salary in force then.
+              </span>
+              {data.next_revision.viewable && (
+                <button type="button" onClick={() => setMonth(data.next_revision!.month)}
+                  className="rounded-md bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700">
+                  View {data.next_revision.month_label}
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
 

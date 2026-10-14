@@ -37,7 +37,13 @@ function scopeLabel(filters: Record<string, string>): string {
   return (filters as Record<string, unknown>).recalculate ? `Recalculation · ${scope}` : scope;
 }
 
-export function BulkLopCard({ batchId, token }: { batchId: string; token: string }) {
+export function BulkLopCard({ batchId, token, onRun, onFinished }: {
+  batchId: string; token: string;
+  /** set by the payroll run card: the run goes through its approval step instead */
+  onRun?: (mode: "APPLY" | "SKIP_ALL", reason: string) => Promise<void>;
+  /** called once when the batch has finished calculating */
+  onFinished?: () => void;
+}) {
   const [status, setStatus] = useState<BatchStatus | null>(null);
   const [page, setPage] = useState<LopPage | null>(null);
   const [pageNo, setPageNo] = useState(1);
@@ -81,6 +87,15 @@ export function BulkLopCard({ batchId, token }: { batchId: string; token: string
     return () => clearInterval(timer);
   }, [running, token, batchId]);
 
+  // tell the payroll run card once the batch has finished
+  const reported = useRef(false);
+  useEffect(() => {
+    if (status?.finished && onFinished && !reported.current) {
+      reported.current = true;
+      onFinished();
+    }
+  }, [status?.finished, onFinished]);
+
   function change(item: LopItem, edit: { apply?: boolean; lop_days?: string }) {
     setError(null);
     const local: LopItem = { ...item, ...edit };
@@ -107,7 +122,12 @@ export function BulkLopCard({ batchId, token }: { batchId: string; token: string
     setSubmitting(true);
     setError(null);
     try {
-      setStatus(await runBatch(token, batchId, mode, mode === "APPLY" ? reason : ""));
+      if (onRun) {
+        await onRun(mode, mode === "APPLY" ? reason : "");
+        setStatus(await batchStatus(token, batchId));
+      } else {
+        setStatus(await runBatch(token, batchId, mode, mode === "APPLY" ? reason : ""));
+      }
     } catch (err) {
       fail(err);
       batchStatus(token, batchId).then(setStatus).catch(() => undefined);
@@ -295,7 +315,7 @@ export function BulkLopCard({ batchId, token }: { batchId: string; token: string
           {status.review_count > 0 && (
             <button type="button" disabled={submitting} onClick={() => start("SKIP_ALL")}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-              Sab skip karo
+              Skip all LOP
             </button>
           )}
           <button type="button"
@@ -303,7 +323,9 @@ export function BulkLopCard({ batchId, token }: { batchId: string; token: string
             title={lopSelected && reason.trim().length < 5 ? "Enter a reason (at least 5 characters)" : undefined}
             onClick={() => start(status.review_count > 0 ? "APPLY" : "SKIP_ALL")}
             className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-            {submitting ? "Starting…" : status.review_count > 0 ? "Apply LOP and run payroll" : "Run payroll"}
+            {submitting ? "Starting…" : onRun
+              ? (status.review_count > 0 ? "Approve LOP & run payroll" : "Approve & run payroll")
+              : status.review_count > 0 ? "Apply LOP and run payroll" : "Run payroll"}
           </button>
         </div>
       </div>

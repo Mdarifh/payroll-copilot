@@ -5,11 +5,13 @@ import { ApiError } from "../lib/api";
 /** Every payroll write goes through this: facts first, then an explicit confirm.
  *  Nothing is sent until the user presses the confirm button. */
 export function ConfirmDialog({
-  title, facts, warning, confirmLabel, tone = "indigo", reasonLabel, onConfirm, onClose, children,
+  title, facts, warning, blocked, confirmLabel, tone = "indigo", reasonLabel, onConfirm, onClose, children,
 }: {
   title: string;
   facts: { label: string; value: ReactNode }[];
   warning?: string;
+  /** why the action is not allowed for this user: shown, and the confirm button is off */
+  blocked?: string | null;
   confirmLabel: string;
   tone?: "indigo" | "rose" | "emerald";
   /** when set, a reason (min 5 characters) is required and passed to onConfirm */
@@ -70,7 +72,8 @@ export function ConfirmDialog({
             ))}
           </dl>
           {children}
-          {warning && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{warning}</p>}
+          {warning && !blocked && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{warning}</p>}
+          {blocked && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{blocked}</p>}
           {needsReason && (
             <label className="block text-xs font-medium text-slate-600">
               {reasonLabel}
@@ -83,7 +86,7 @@ export function ConfirmDialog({
         <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <button type="button" onClick={onClose} disabled={busy}
             className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200">Cancel</button>
-          <button type="button" onClick={confirm} disabled={busy || !ready}
+          <button type="button" onClick={confirm} disabled={busy || !ready || !!blocked}
             className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${button}`}>
             {busy ? "Working…" : confirmLabel}
           </button>

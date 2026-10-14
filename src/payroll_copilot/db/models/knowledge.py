@@ -46,3 +46,6 @@ class KnowledgeChunk(IdMixin, Base):
     heading: Mapped[str] = mapped_column(String(300))  # "Title > Section"
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # semantic search (optional, KB_EMBEDDING_MODEL): the vector and the model that made it
+    embedding: Mapped[list[float] | None] = mapped_column(JSON)
+    embedding_model: Mapped[str | None] = mapped_column(String(64))

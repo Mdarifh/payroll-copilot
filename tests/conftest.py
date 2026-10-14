@@ -16,7 +16,8 @@ _ENV_VARS = [
     "LLM_PROVIDER", "LLM_MAX_STEPS", "OLLAMA_MODEL", "OLLAMA_TEMPERATURE", "OLLAMA_BASE_URL",
     "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
     "DEFAULT_PAID_DAYS_BASIS", "DEFAULT_ROUNDING_MODE", "ALLOW_UNVERIFIED_RULES",
-    "LOP_DIVISOR", "LOP_BASE", "LEAVE_ENTITLEMENTS", "CORS_ORIGINS",
+    "LOP_DIVISOR", "LOP_BASE", "LEAVE_ENTITLEMENTS", "CORS_ORIGINS", "KB_EMBEDDING_MODEL",
+    "KB_MIN_SIMILARITY",
 ]  # fmt: skip
 
 
@@ -27,6 +28,7 @@ def isolated_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     monkeypatch.setenv("JWT_SECRET", TEST_JWT_SECRET)
+    monkeypatch.setenv("CHECKPOINT_DB", ":memory:")  # never the real data/checkpoints.db
     for cache in (get_settings, get_engine, jwt_signing_key):
         cache.cache_clear()
     yield

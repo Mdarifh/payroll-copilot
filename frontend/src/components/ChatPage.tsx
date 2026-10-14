@@ -1,12 +1,15 @@
 import { LeaveRequestCard, TaxCompareCard } from "./LeaveTaxCards";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MessageSquare, Plus, Trash2 } from "lucide-react";
-import { ApiError, chatSession, chatSessions, forgetChat, sendChat, type ChatSessionSummary } from "../lib/api";
+import { ApiError, chatSession, chatSessions, forgetChat, streamChat, type ChatSessionSummary } from "../lib/api";
 import type { BotMessage, ChatItem, Payslip, Session } from "../lib/types";
 import { BotIcon, SendIcon } from "./icons";
 import { BulkLopCard } from "./BulkLopCard";
+import { PayrollFlowCard } from "./PayrollFlowCard";
 import { ActionPreviewCard, CompareCard, ExplainCard, InfoCard, KnowledgeCard, RulesCard } from "./InsightCards";
 import { PayslipCard } from "./PayslipCard";
+import { RunSelectedCard } from "./RunSelectedCard";
+import { ActionListCard, LeaveListCard } from "./ApprovalCards";
 import type { PageId } from "../lib/nav";
 import { isStaffRole } from "../lib/permissions";
 
@@ -15,11 +18,15 @@ type Chip = { label: string; message: string; fill?: boolean };
 const EMPLOYEE_CHIPS: Chip[] = [
   { label: "Payslip", message: "Show my latest payslip" },
   { label: "Leave balance", message: "What is my leave balance?" },
+  { label: "My leave requests", message: "Show my leave status" },
   { label: "Tax summary", message: "Show my tax summary for this financial year" },
   { label: "Explain my PF", message: "How is my PF calculated?" },
   { label: "Compare my pay", message: "Compare my pay for last month and the month before", fill: true },
 ];
 const HR_CHIPS: Chip[] = [
+  { label: "Pending approvals", message: "Show pending approvals" },
+  { label: "Leave requests", message: "Show pending leave requests" },
+  { label: "Run payroll for one", message: "Run October 2026 payroll for EMP-101", fill: true },
   { label: "Explain PF", message: "Explain PF rules" },
   { label: "Explain ESIC", message: "Explain ESIC rules" },
   { label: "Explain PT", message: "Explain PT rules" },
@@ -63,6 +70,12 @@ function BotBubble({ message, token, onNavigate }: {
   if (message.type === "bulk_lop_card") {
     return <BulkLopCard batchId={String(message.batch_id)} token={token} />;
   }
+  if (message.type === "run_selected_card") return <RunSelectedCard card={card} token={token} />;
+  if (message.type === "leave_list_card") return <LeaveListCard card={card} token={token} />;
+  if (message.type === "action_list_card") return <ActionListCard card={card} token={token} />;
+  if (message.type === "payroll_flow_card") {
+    return <PayrollFlowCard card={card} token={token} onNavigate={onNavigate} />;
+  }
   return ( // other card types are not supported yet
     <div className="rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500">
       This kind of card ({message.type}) is not supported yet.
@@ -89,6 +102,8 @@ export function ChatPage({ session, onExpired, ask, onNavigate }: {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
+  const [status, setStatus] = useState<string | null>(null); // what the assistant is doing now
+  const [draft, setDraft] = useState(""); // the answer as it is being written
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -98,7 +113,7 @@ export function ChatPage({ session, onExpired, ask, onNavigate }: {
     // block body: newer browsers return a Promise from scrollIntoView, and an effect
     // may only return a clean-up function
     void bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [items, busy]);
+  }, [items, busy, draft, status]);
 
   useEffect(() => {
     if (ask) void send(ask.text);
@@ -113,7 +128,11 @@ export function ChatPage({ session, onExpired, ask, onNavigate }: {
     setBusy(true);
     const slowTimer = setTimeout(() => setSlow(true), 8000);
     try {
-      const reply = await sendChat(token, message, conversationId);
+      const reply = await streamChat(token, message, conversationId, (event) => {
+        if (event.event === "status") setStatus(event.text);
+        else if (event.event === "reset") setDraft("");
+        else if (event.event === "token") { setStatus(null); setDraft((d) => d + event.text); }
+      });
       setConversationId(reply.conversation_id);
       void refreshSessions();
       setModel(reply.model);
@@ -127,6 +146,8 @@ export function ChatPage({ session, onExpired, ask, onNavigate }: {
       clearTimeout(slowTimer);
       setBusy(false);
       setSlow(false);
+      setStatus(null);
+      setDraft("");
     }
   }
 
@@ -237,14 +258,22 @@ export function ChatPage({ session, onExpired, ask, onNavigate }: {
             <div key={item.id} className="flex"><BotBubble message={item.message} token={token} onNavigate={onNavigate} /></div>
           ),
         )}
-        {busy && (
+        {busy && draft && (
+          <div className="flex">
+            <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 shadow-sm">
+              {draft}<span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-indigo-400 align-text-bottom" />
+            </div>
+          </div>
+        )}
+        {busy && !draft && (
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <span className="flex gap-1">
               <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
               <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
               <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
             </span>
-            {slow && <span>Thinking… the first answer can take up to a minute.</span>}
+            {status && <span>{status}</span>}
+            {slow && <span className="text-xs text-slate-400">The first answer can take up to a minute.</span>}
           </div>
         )}
         <div ref={bottom} />

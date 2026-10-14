@@ -6,7 +6,6 @@ from sqlalchemy import select
 
 from payroll_copilot.api.main import create_app
 from payroll_copilot.db.models import AuditLog
-from payroll_copilot.llm.base import LLMUnavailableError
 from tests.unit.chat.conftest import TODAY, FakeChatModel, call, say
 
 
@@ -35,7 +34,7 @@ def test_chat_payslip_flow(seeded_engine, make_settings, seeded_session, rahul):
                           say("You're welcome!"))  # fmt: skip
     client = client_with(seeded_engine, make_settings, model)
     auth = token(client, rahul)
-    r = client.post("/chat", json={"message": "August payslip"}, headers=auth)
+    r = client.post("/chat", json={"message": "August?"}, headers=auth)
     assert r.status_code == 200
     body = r.json()
     assert [m["type"] for m in body["messages"]] == ["text", "payslip_card"]
@@ -62,8 +61,8 @@ def test_chat_validation(seeded_engine, make_settings, rahul):
 
 def test_llm_down_is_503(seeded_engine, make_settings, rahul):
     class Down(FakeChatModel):
-        def complete(self, *args):
-            raise LLMUnavailableError("Ollama is not reachable")
+        def _generate(self, *args, **kwargs):
+            raise ConnectionError("Failed to connect to Ollama")  # what the ollama client raises
 
     client = client_with(seeded_engine, make_settings, Down())
     r = client.post("/chat", json={"message": "hi"}, headers=token(client, rahul))

@@ -9,9 +9,10 @@
   404 not found, 422 invalid input, 503 LLM / configuration unavailable.
 """
 
+import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any
@@ -19,8 +20,9 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from langchain_core.language_models import BaseChatModel
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
@@ -34,6 +36,7 @@ from payroll_copilot.api.knowledge import router as knowledge_router
 from payroll_copilot.api.leaves import router as leaves_router
 from payroll_copilot.api.overview import router as overview_router
 from payroll_copilot.api.payroll import router as payroll_router
+from payroll_copilot.api.payroll_flows import router as payroll_flows_router
 from payroll_copilot.api.reports import router as reports_router
 from payroll_copilot.api.schemas import (
     ChatRequest,
@@ -59,12 +62,13 @@ from payroll_copilot.core.exceptions import (
 from payroll_copilot.db.models import Employee
 from payroll_copilot.db.session import get_engine, get_session_factory
 from payroll_copilot.llm import get_chat_model
-from payroll_copilot.llm.base import ChatModel, LLMUnavailableError
+from payroll_copilot.llm.base import LLMUnavailableError
 from payroll_copilot.repositories.payroll_repo import PayrollRepository
 from payroll_copilot.services import audit
 from payroll_copilot.services.action_center import ActionConflictError
 from payroll_copilot.services.batch_service import BatchConflictError
 from payroll_copilot.services.batch_worker import BatchWorker
+from payroll_copilot.services.payroll_flow import PayrollFlow, sqlite_checkpointer
 from payroll_copilot.services.payslip_pdf import render_payslip_pdf
 
 log = logging.getLogger(__name__)
@@ -82,8 +86,8 @@ _DEFAULT_MODEL: Any = object()  # "build the model from settings"
 
 def create_app(
     settings: Settings | None = None, engine: Engine | None = None,
-    chat_model: ChatModel | None = _DEFAULT_MODEL, today: Callable[[], date] = date.today,
-    worker: BatchWorker | None = _DEFAULT_MODEL,
+    chat_model: BaseChatModel | None = _DEFAULT_MODEL, today: Callable[[], date] = date.today,
+    worker: BatchWorker | None = _DEFAULT_MODEL, checkpointer: Any = None,
 ) -> FastAPI:  # fmt: skip
     settings = settings or get_settings()
 
@@ -118,12 +122,30 @@ def create_app(
     app.state.worker = worker
     app.state.today = today
     app.state.chat_agent = None
+    holder: dict[str, Any] = {}
+
+    def saver() -> Any:
+        """One LangGraph checkpointer (own SQLite file) for chat memory and payroll runs."""
+        if "saver" not in holder:
+            holder["saver"] = checkpointer or sqlite_checkpointer(settings.checkpoint_db)
+        return holder["saver"]
 
     def chat_agent() -> ChatAgent:
         if app.state.chat_agent is None:
             model = get_chat_model(settings) if chat_model is _DEFAULT_MODEL else chat_model
-            app.state.chat_agent = ChatAgent(model, max_steps=settings.llm_max_steps)
+            app.state.chat_agent = ChatAgent(model, max_steps=settings.llm_max_steps,
+                                             checkpointer=saver())  # fmt: skip
         return app.state.chat_agent
+
+    def payroll_flow() -> PayrollFlow:
+        """LangGraph payroll runs with HR approval; paused runs survive a restart."""
+        if "flow" not in holder:
+            holder["flow"] = PayrollFlow(
+                app.state.session_factory, saver(),
+                wake_worker=lambda: app.state.worker and app.state.worker.wake())
+        return holder["flow"]
+
+    app.state.payroll_flow = payroll_flow
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                        allow_methods=["*"], allow_headers=["*"])  # fmt: skip
 
@@ -217,19 +239,26 @@ def create_app(
 
     # ------------------------------------------------------------------ chat
 
-    @app.post("/chat", tags=["chat"], response_model=ChatResponse)
-    def chat(body: ChatRequest, request: Request, user: Employee = Depends(current_user),
-             session: Session = Depends(get_session)) -> ChatResponse:  # fmt: skip
+    def _chat_turn(session: Session, user: Employee, body: ChatRequest,
+                   request_id: str) -> tuple[ToolContext, str, Any]:  # fmt: skip
+        """The tool context of one chat message (saved follow-up context and history)."""
         from payroll_copilot.services import chat_history
 
         conversation_id = body.conversation_id or uuid4().hex[:16]
         saved = chat_history.get(session, user, conversation_id)
         ctx = ToolContext(session=session, user=user, today=app.state.today(),
-                          request_id=request.state.request_id,
+                          request_id=request_id,
                           chat_context=dict(saved.context) if saved else {},
-                          history=chat_history.previous_turns(session, saved))  # fmt: skip
-        reply = chat_agent().ask(ctx, body.message, conversation_id)
-        chat = saved or chat_history.get_or_create(session, user, conversation_id, body.message)
+                          history=chat_history.previous_turns(session, saved),
+                          payroll_flow=payroll_flow())  # fmt: skip
+        return ctx, conversation_id, saved
+
+    def _save_turn(session: Session, user: Employee, body: ChatRequest, ctx: ToolContext,
+                   saved: Any, reply: Any, request_id: str) -> ChatResponse:  # fmt: skip
+        from payroll_copilot.services import chat_history
+
+        chat = saved or chat_history.get_or_create(session, user, reply.conversation_id,
+                                                   body.message)  # fmt: skip
         chat_history.append(session, chat, body.message, reply.messages, reply.tools_used)
         chat.context = ctx.chat_context
         session.add_all(ctx.audit_rows)
@@ -237,15 +266,61 @@ def create_app(
                      entity_id=reply.conversation_id,
                      new={"message": body.message[:300], "tools": reply.tools_used,
                           "model": reply.model, "warnings": reply.warnings},
-                     request_id=request.state.request_id)  # fmt: skip
+                     request_id=request_id)  # fmt: skip
         return ChatResponse(**reply.__dict__)
+
+    @app.post("/chat", tags=["chat"], response_model=ChatResponse)
+    def chat(body: ChatRequest, request: Request, user: Employee = Depends(current_user),
+             session: Session = Depends(get_session)) -> ChatResponse:  # fmt: skip
+        request_id = request.state.request_id
+        ctx, conversation_id, saved = _chat_turn(session, user, body, request_id)
+        reply = chat_agent().ask(ctx, body.message, conversation_id)
+        return _save_turn(session, user, body, ctx, saved, reply, request_id)
+
+    @app.post("/chat/stream", tags=["chat"], summary="Chat with live progress (server-sent events)")
+    def chat_stream(body: ChatRequest, request: Request,
+                    user: Employee = Depends(current_user)) -> StreamingResponse:  # fmt: skip
+        """Like POST /chat, as ``text/event-stream``: ``status`` (what the assistant is
+        doing), ``token`` (the answer as it is written), ``reset`` (drop the draft),
+        then ``done`` with the same body as POST /chat - or ``error``."""
+        user_id, request_id = user.id, request.state.request_id
+
+        def sse(event: dict[str, Any]) -> str:
+            return f"data: {json.dumps(event, default=str)}\n\n"
+
+        def events() -> Iterator[str]:
+            # its own transaction: the request's session ends before the stream does
+            with app.state.session_factory() as session:
+                try:
+                    me = session.get(Employee, user_id)
+                    ctx, conversation_id, saved = _chat_turn(session, me, body, request_id)
+                    for event in chat_agent().stream(ctx, body.message, conversation_id):
+                        if event["event"] != "done":
+                            yield sse(event)
+                            continue
+                        done = _save_turn(session, me, body, ctx, saved, event["reply"],
+                                          request_id)  # fmt: skip
+                        session.commit()
+                        yield sse({"event": "done", **done.model_dump()})
+                except Exception as exc:  # noqa: BLE001 - reported to the client as an event
+                    session.rollback()
+                    status = (503 if isinstance(exc, LLMUnavailableError) else
+                              422 if isinstance(exc, PayrollCopilotError) else 500)  # fmt: skip
+                    if status == 500:
+                        log.exception("chat stream failed")
+                    yield sse({"event": "error", "status": status,
+                               "detail": str(exc) if status != 500 else "Internal error"})
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})  # fmt: skip
 
     @app.delete("/chat/{conversation_id}", tags=["chat"], summary="Delete a conversation")
     def forget(conversation_id: str, user: Employee = Depends(current_user),
                session: Session = Depends(get_session)) -> dict[str, Any]:  # fmt: skip
         from payroll_copilot.services import chat_history
 
-        memory = chat_agent().store.clear(user.id, conversation_id)
+        memory = chat_agent().forget(user.id, conversation_id)
         saved = chat_history.remove(session, user, conversation_id)
         return {"conversation_id": conversation_id, "cleared": memory or saved}
 
@@ -292,6 +367,7 @@ def create_app(
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     app.include_router(batch_router)
+    app.include_router(payroll_flows_router)
     app.include_router(runs_router)
     app.include_router(directory_router)
     app.include_router(overview_router)

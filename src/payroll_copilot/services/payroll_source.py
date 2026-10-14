@@ -60,7 +60,8 @@ class PayrollSource(Protocol):
     def absences(self, employee_ids: list[int],
                  period: PayrollPeriod) -> dict[int, list[tuple[date, Decimal]]]: ...
 
-    def lop_decided(self, employee_ids: list[int], period: PayrollPeriod) -> set[int]: ...
+    def lop_decided(self, employee_ids: list[int],
+                    period: PayrollPeriod) -> dict[int, Decimal]: ...  # employee -> LOP days
 
     def processed(self, employee_ids: list[int], period: PayrollPeriod) -> set[int]: ...
 
@@ -115,10 +116,11 @@ class LocalPayrollSource:
             result[employee_id].append((day, days))
         return dict(result)
 
-    def lop_decided(self, employee_ids: list[int], period: PayrollPeriod) -> set[int]:
-        stmt = select(LopRecord.employee_id).where(
+    def lop_decided(self, employee_ids: list[int],
+                    period: PayrollPeriod) -> dict[int, Decimal]:  # fmt: skip
+        stmt = select(LopRecord.employee_id, LopRecord.days).where(
             LopRecord.employee_id.in_(employee_ids), LopRecord.period == str(period))
-        return set(self._call(lambda: self.session.scalars(stmt).all()))  # fmt: skip
+        return dict(self._call(lambda: self.session.execute(stmt).all()))  # fmt: skip
 
     def processed(self, employee_ids: list[int], period: PayrollPeriod) -> set[int]:
         stmt = select(PayrollRun.employee_id).where(

@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-sonnet-5"
 
+    # LangGraph checkpoints of paused payroll runs (human-in-the-loop); ":memory:" for tests
+    checkpoint_db: str = "./data/checkpoints.db"
+
+    # ---------- Knowledge base (RAG) ----------
+    # Ollama embedding model for semantic search, e.g. nomic-embed-text (run
+    # `ollama pull nomic-embed-text`). Empty = keyword search (BM25) only.
+    kb_embedding_model: str = ""
+    # a passage found only by meaning must be at least this similar to the question
+    kb_min_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
+
     # ---------- API ----------
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)

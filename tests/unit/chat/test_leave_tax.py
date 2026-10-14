@@ -50,7 +50,7 @@ def test_extract_declarations():
     ("I want to apply sick leave 20 to 22 Oct", "apply_leave"),
     ("kal ki chhutti chahiye", "apply_leave"),
     ("how to apply leave?", "knowledge_question"),
-    ("what is my leave balance?", "none"),
+    ("what is my leave balance?", "leave_balance"),
     ("EMP-101 ka 15 Sep absent mark karo", "update_attendance"),
     ("which regime is better for me?", "tax_help"),
     ("80C 1.5 lakh invest karu to kitna tax bachega", "tax_help"),

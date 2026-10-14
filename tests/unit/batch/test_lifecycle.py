@@ -150,3 +150,27 @@ def test_lifecycle_over_http(seeded_engine, make_settings):
         "FINALIZED")
     challan = client.get("/payroll-runs/2026-09/challan", headers=maker).json()
     assert challan["contributing_members"] == 3 and date.fromisoformat("2026-09-01")
+
+
+def test_month_view_shows_the_runs_own_pay_and_who_may_approve(seeded_engine):
+    from decimal import Decimal
+
+    from payroll_copilot.services.payroll_runs import month_detail
+
+    calculated_batch(seeded_engine, department="Sales")  # another run of the same month
+    batch_id = calculated_batch(seeded_engine, department="Engineering")
+    factory = get_session_factory(seeded_engine)
+    with factory() as s:
+        svc.validate(s, batch_id, emp(s, "HR-001"))
+        s.flush()
+        maker = month_detail(s, SEP, emp(s, "HR-001"))
+        run = next(b for b in maker["batches"] if b["batch_id"] == batch_id)
+        mine = s.scalars(select(PayrollRun.net_pay).join(
+            Employee, Employee.id == PayrollRun.employee_id).where(
+            PayrollRun.period == "2026-09", Employee.department == "Engineering")).all()
+        assert Decimal(run["batch_net"]) == sum(mine) < Decimal(maker["net"])
+        assert run["prepared_by_me"] and not run["can_approve"]
+        assert "different HR user" in run["approve_blocked_reason"]
+        checker = next(b for b in month_detail(s, SEP, emp(s, "HR-002"))["batches"]
+                       if b["batch_id"] == batch_id)
+        assert checker["can_approve"] and checker["approve_blocked_reason"] is None

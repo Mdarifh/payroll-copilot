@@ -22,13 +22,19 @@ from payroll_copilot.core.exceptions import PayrollCopilotError, RuleNotFoundErr
 from payroll_copilot.db.base import iso_utc
 from payroll_copilot.db.models import (
     Attendance,
+    BatchItem,
     Employee,
     LopRecord,
     PayrollBatch,
     PayrollRun,
     SalaryStructure,
 )
-from payroll_copilot.domain.enums import AttendanceStatus, PayrollRunStatus, RuleType
+from payroll_copilot.domain.enums import (
+    AttendanceStatus,
+    BatchItemStatus,
+    PayrollRunStatus,
+    RuleType,
+)
 from payroll_copilot.rules.context import build_employee_context
 from payroll_copilot.rules.service import RuleService
 from payroll_copilot.services import batch_service as batches
@@ -98,7 +104,22 @@ def list_months(session: Session, limit: int = 12) -> list[dict[str, Any]]:
     } for p in periods]  # fmt: skip
 
 
-def month_detail(session: Session, period: PayrollPeriod) -> dict[str, Any]:
+def _batch_pay(session: Session, batch: PayrollBatch) -> dict[str, str]:
+    """Gross / net of the payslips THIS batch calculated (not the whole month)."""
+    gross, net = session.execute(
+        select(func.coalesce(func.sum(PayrollRun.gross_earnings), 0),
+               func.coalesce(func.sum(PayrollRun.net_pay), 0))
+        .join(BatchItem, (BatchItem.employee_id == PayrollRun.employee_id)
+              & (BatchItem.batch_pk == batch.id))
+        .where(PayrollRun.period == batch.period,
+               BatchItem.status == BatchItemStatus.DONE)).one()  # fmt: skip
+    return {"gross": str(Decimal(gross)), "net": str(Decimal(net))}
+
+
+def month_detail(session: Session, period: PayrollPeriod,
+                 viewer: Employee | None = None) -> dict[str, Any]:  # fmt: skip
+    from payroll_copilot.services.company_config import get_config
+
     p = str(period)
     totals = _totals(session, [p])[p]
     rows = list(session.scalars(select(PayrollBatch).where(PayrollBatch.period == p)
@@ -106,14 +127,26 @@ def month_detail(session: Session, period: PayrollPeriod) -> dict[str, Any]:
     names = dict(session.execute(select(Employee.id, Employee.full_name).where(Employee.id.in_(
         {b.created_by_id for b in rows} | {b.approved_by_id for b in rows if b.approved_by_id}
         | {b.finalized_by_id for b in rows if b.finalized_by_id}))).all())  # fmt: skip
+    second_approver = bool(get_config(session, period.end)["payroll_second_approver"])
+
+    def approval(b: PayrollBatch) -> dict[str, Any]:
+        mine = viewer is not None and viewer.id == b.created_by_id
+        blocked = ("Maker-checker: you prepared this payroll, so a different HR user must "
+                   "approve it" if second_approver and mine else None)  # fmt: skip
+        return {"prepared_by_me": mine, "approve_blocked_reason": blocked,
+                "can_approve": b.stage == "VALIDATED" and blocked is None}
+
     return {
         "period": p, "label": period.label,
         "employees": totals["employees"], "locked": totals["locked"],
         "gross": str(totals["gross"]), "deductions": str(totals["deductions"]),
         "net": str(totals["net"]),
         "status": _month_status(totals, rows[0] if rows else None),
+        "second_approver_required": second_approver,
         "batches": [{
             **batches.status(session, b),
+            **{f"batch_{k}": v for k, v in _batch_pay(session, b).items()},
+            **approval(b),
             "created_at": iso_utc(b.created_at),
             "created_by": names.get(b.created_by_id),
             "approved_by": names.get(b.approved_by_id),
@@ -130,6 +163,7 @@ class _Check:
         self.key, self.label = key, label
         self.failed: set[str] = set()
         self.warned: set[str] = set()
+        self.errors: list[dict[str, Any]] = []  # kept apart: failures are always listed first
         self.issues: list[dict[str, Any]] = []
         self.counts: Counter[str] = Counter()
         self.notes: list[dict[str, str]] = []  # company-level
@@ -137,9 +171,10 @@ class _Check:
     def add(self, severity: str, employee: Employee, message: str) -> None:
         (self.failed if severity == "ERROR" else self.warned).add(employee.employee_code)
         self.counts[severity] += 1
-        if len(self.issues) < MAX_ISSUES:
-            self.issues.append({"severity": severity, "employee_code": employee.employee_code,
-                                "employee_name": employee.full_name, "message": message})
+        kept = self.errors if severity == "ERROR" else self.issues
+        if len(kept) < MAX_ISSUES:
+            kept.append({"severity": severity, "employee_code": employee.employee_code,
+                         "employee_name": employee.full_name, "message": message})
 
     def note(self, severity: str, message: str) -> None:
         self.notes.append({"severity": severity, "message": message})
@@ -153,7 +188,7 @@ class _Check:
             "key": self.key, "label": self.label, "status": status,
             "passed": scope - len(self.failed | self.warned),
             "warnings": len(self.warned - self.failed), "failed": len(self.failed),
-            "notes": self.notes, "issues": self.issues,
+            "notes": self.notes, "issues": (self.errors + self.issues)[:MAX_ISSUES],
             "issue_count": self.counts["ERROR"] + self.counts["WARNING"],
         }  # fmt: skip
 
@@ -194,8 +229,8 @@ def prechecks(session: Session, period: PayrollPeriod, department: str | None = 
             Attendance.employee_id.in_(ids), Attendance.day.between(period.start, period.end),
             Attendance.status.in_([AttendanceStatus.ABSENT, AttendanceStatus.HALF_DAY]))):
         absent[emp_id] += Decimal(1) if st is AttendanceStatus.ABSENT else Decimal("0.5")
-    decided = set(session.scalars(select(LopRecord.employee_id).where(
-        LopRecord.employee_id.in_(ids), LopRecord.period == str(period))))  # fmt: skip
+    decided = dict(session.execute(select(LopRecord.employee_id, LopRecord.days).where(
+        LopRecord.employee_id.in_(ids), LopRecord.period == str(period))).all())  # fmt: skip
     locked = set(session.scalars(select(PayrollRun.employee_id).where(
         PayrollRun.employee_id.in_(ids), PayrollRun.period == str(period),
         PayrollRun.status == PayrollRunStatus.LOCKED)))  # fmt: skip
@@ -243,6 +278,10 @@ def prechecks(session: Session, period: PayrollPeriod, department: str | None = 
             checks["ATTENDANCE"].add("WARNING", e, f"{absent[e.id].normalize():f} absent day(s) "
                                                    "without approved leave - decide LOP in the "
                                                    "review")  # fmt: skip
+        elif absent.get(e.id, ZERO) > decided.get(e.id, ZERO):  # absences after the decision
+            checks["ATTENDANCE"].add("WARNING", e, f"{absent[e.id].normalize():f} absent day(s) "
+                                                   "without approved leave but LOP is "
+                                                   f"{decided[e.id].normalize():f} - review LOP")
         if e.pf_applicable:
             if e.pf_applicable_date is None:
                 pf.add("ERROR", e, "PF Applicable Date is missing")
@@ -295,13 +334,16 @@ def prechecks(session: Session, period: PayrollPeriod, department: str | None = 
 
 
 def register(session: Session, period: PayrollPeriod, search: str | None = None,
-             page: int = 1, page_size: int = 20) -> dict[str, Any]:  # fmt: skip
+             page: int = 1, page_size: int = 20,
+             codes: list[str] | None = None) -> dict[str, Any]:  # fmt: skip
     """Employees of the month with their payslip (or why there is none) - the list HR edits
-    LOP / one-off pay / attendance from."""
+    LOP / one-off pay / attendance from. ``codes`` limits it to those employees."""
     from payroll_copilot.db.models import BatchItem
 
     stmt = select(Employee).where(
         Employee.doj <= period.end, or_(Employee.lwd.is_(None), Employee.lwd >= period.start))
+    if codes is not None:
+        stmt = stmt.where(Employee.employee_code.in_(codes))
     if search and search.strip():
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(func.lower(Employee.full_name).like(like)

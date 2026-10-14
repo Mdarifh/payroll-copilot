@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from langchain_core.embeddings import Embeddings
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -91,33 +93,25 @@ def _date(value: Any) -> date | None:
     return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
+_HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3"), ("####", "h4")]
+_SECTIONS = MarkdownHeaderTextSplitter(_HEADERS, strip_headers=True)
+_PIECES = RecursiveCharacterTextSplitter(chunk_size=CHUNK_CHARS, chunk_overlap=0,
+                                         separators=["\n\n", "\n", " ", ""])  # fmt: skip
+
+
 def chunk(title: str, text: str) -> list[tuple[str, str]]:
-    """(heading path, text) pieces split on markdown headings, max ~CHUNK_CHARS each."""
-    sections: list[tuple[str, list[str]]] = [(title, [])]
-    stack: list[str] = [title]
-    for line in text.splitlines():
-        if line.startswith("> Generated from"):
-            continue  # boilerplate of generated rule pages, not policy content
-        m = re.match(r"^(#{1,4})\s+(.*)", line)
-        if m:
-            level, name = len(m.group(1)), m.group(2).strip()
-            stack = [name] if level == 1 else stack[: level - 1] + [name]
-            sections.append((" › ".join(stack), []))
-        else:
-            sections[-1][1].append(line)
+    """(heading path, text) pieces: LangChain splits on markdown headings, then by
+    paragraph to at most CHUNK_CHARS each. Text before the first heading gets ``title``."""
+    # boilerplate of generated rule pages, not policy content
+    text = "\n".join(ln for ln in text.splitlines() if not ln.startswith("> Generated from"))
     out: list[tuple[str, str]] = []
-    for heading, lines in sections:
-        body = "\n".join(lines).strip()
-        if not body:
-            continue
-        paras, piece = re.split(r"\n\s*\n", body), ""
-        for para in paras:
-            if piece and len(piece) + len(para) > CHUNK_CHARS:
-                out.append((heading, piece.strip()))
-                piece = ""
-            piece += para + "\n\n"
-        if piece.strip():
-            out.append((heading, piece.strip()))
+    for section in _SECTIONS.split_text(text):
+        path = [section.metadata[k] for _, k in _HEADERS if k in section.metadata]
+        if "h1" not in section.metadata:
+            path.insert(0, title)  # a "## Section" without a "# Title" sits under the title
+        heading = " › ".join(path)
+        out.extend((heading, piece.strip()) for piece in _PIECES.split_text(section.page_content)
+                   if piece.strip())  # fmt: skip
     return out
 
 
@@ -180,8 +174,17 @@ def ingest(session: Session, root: Path = KB_ROOT, tenant: str = TENANT) -> dict
         stats["removed"] += 1
     session.flush()
     _INDEX.clear()
-    return {**{k: stats.get(k, 0) for k in ("added", "updated", "unchanged", "removed")},
-            "errors": errors}
+    result: dict[str, Any] = {k: stats.get(k, 0) for k in ("added", "updated", "unchanged",
+                                                          "removed")}  # fmt: skip
+    from payroll_copilot.services.policy_retriever import get_embeddings
+
+    embeddings = get_embeddings()
+    if embeddings is not None:
+        try:
+            result["embedded"] = embed_chunks(session, embeddings, tenant)
+        except Exception as exc:  # noqa: BLE001 - keyword search still works without vectors
+            errors.append(f"embeddings not updated: {exc}")
+    return {**result, "errors": errors}
 
 
 # ---------------------------------------------------------------------- search
@@ -286,24 +289,117 @@ def search(session: Session, user: Employee, query: str, policy_type: str | None
         if sum(1 for t in set(q) if t in d.terms) < needed:
             continue  # a passage sharing only a common word is not an answer
         c, doc = rows[d.chunk_id]
-        if role not in doc.access_roles:
-            continue
-        if policy_type and doc.policy_type != policy_type:
-            continue
-        if on and ((doc.effective_from and doc.effective_from > on)
-                   or (doc.effective_to and doc.effective_to < on)):
-            continue
-        if per_doc[doc.id] >= 2:  # variety: at most 2 passages per document
+        if not _readable(doc, role, policy_type, on) or per_doc[doc.id] >= 2:
+            continue  # variety: at most 2 passages per document
+        per_doc[doc.id] += 1
+        out.append(_passage(c, doc, q, score))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _readable(doc: KnowledgeDocument, role: str, policy_type: str | None,
+              on: date | None) -> bool:  # fmt: skip
+    """May this reader see the document, and is it in force on ``on``?"""
+    if role not in doc.access_roles or (policy_type and doc.policy_type != policy_type):
+        return False
+    return not (on and ((doc.effective_from and doc.effective_from > on)
+                        or (doc.effective_to and doc.effective_to < on)))  # fmt: skip
+
+
+def _passage(c: KnowledgeChunk, doc: KnowledgeDocument, q: list[str],
+             score: float) -> dict[str, Any]:  # fmt: skip
+    return {
+        "chunk_id": c.id, "document_id": doc.id, "title": doc.title, "section": c.heading,
+        "snippet": _snippet(c.text, q), "text": c.text, "score": round(score, 3),
+        "source": doc.source, "status": doc.status, "jurisdiction": doc.jurisdiction,
+        "policy_type": doc.policy_type, "document_type": doc.document_type,
+        "effective_from": doc.effective_from and doc.effective_from.isoformat(),
+        "effective_to": doc.effective_to and doc.effective_to.isoformat(),
+    }  # fmt: skip
+
+
+# ---------------------------------------------------------------------- embeddings
+
+
+def _embedding_input(heading: str, text: str) -> str:
+    return f"{heading}\n{text}"
+
+
+def embed_chunks(session: Session, embeddings: Embeddings, tenant: str = TENANT) -> int:
+    """Store a vector for every chunk that has none from this model; returns how many.
+
+    Runs at ingest (API start, ``payroll-chatbot kb``, uploads) so searches only read.
+    """
+    model = getattr(embeddings, "model", None) or type(embeddings).__name__
+    pending = list(session.scalars(
+        select(KnowledgeChunk)
+        .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
+        .where(KnowledgeDocument.tenant_id == tenant,
+               (KnowledgeChunk.embedding_model.is_(None))
+               | (KnowledgeChunk.embedding_model != model))))  # fmt: skip
+    for start in range(0, len(pending), 32):
+        batch = pending[start:start + 32]
+        vectors = embeddings.embed_documents([_embedding_input(c.heading, c.text) for c in batch])
+        for c, vector in zip(batch, vectors, strict=True):
+            c.embedding, c.embedding_model = [round(float(x), 6) for x in vector], model
+    session.flush()
+    _VECTORS.clear()
+    return len(pending)
+
+
+_VECTORS: dict[str, Any] = {}
+
+
+def _vectors(session: Session, model: str, tenant: str) -> list[tuple[int, list[float], float]]:
+    """(chunk id, vector, norm) of every embedded chunk, cached until the KB changes."""
+    signature = session.execute(
+        select(func.count(KnowledgeChunk.id), func.max(KnowledgeDocument.updated_at))
+        .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
+        .where(KnowledgeDocument.tenant_id == tenant,
+               KnowledgeChunk.embedding_model == model)).one()  # fmt: skip
+    key = f"{tenant}:{model}:{signature[0]}:{signature[1]}"
+    if _VECTORS.get("key") != key:
+        rows = session.execute(
+            select(KnowledgeChunk.id, KnowledgeChunk.embedding)
+            .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
+            .where(KnowledgeDocument.tenant_id == tenant,
+                   KnowledgeChunk.embedding_model == model))  # fmt: skip
+        _VECTORS.clear()
+        _VECTORS.update(key=key, rows=[(cid, v, math.sqrt(sum(x * x for x in v)) or 1.0)
+                                       for cid, v in rows if v])  # fmt: skip
+    return _VECTORS["rows"]
+
+
+def semantic_search(session: Session, user: Employee, query: str, embeddings: Embeddings,
+                    policy_type: str | None = None, on: date | None = None, limit: int = 5,
+                    min_similarity: float = 0.0,
+                    tenant: str = TENANT) -> list[dict[str, Any]]:  # fmt: skip
+    """Passages closest in meaning to ``query`` (cosine similarity of embeddings), with the
+    same role / policy / date filters as keyword search. ``score`` is the similarity."""
+    model = getattr(embeddings, "model", None) or type(embeddings).__name__
+    rows = _vectors(session, model, tenant)
+    if not rows or not query.strip():
+        return []
+    qv = embeddings.embed_query(query)
+    qn = math.sqrt(sum(x * x for x in qv)) or 1.0
+    scored = sorted(((cid, sum(a * b for a, b in zip(qv, v, strict=False)) / (qn * n))
+                     for cid, v, n in rows), key=lambda x: -x[1])  # fmt: skip
+    scored = [(cid, s) for cid, s in scored[: limit * 6] if s >= min_similarity]
+    if not scored:
+        return []
+    found = {c.id: (c, doc) for c, doc in session.execute(
+        select(KnowledgeChunk, KnowledgeDocument)
+        .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
+        .where(KnowledgeChunk.id.in_([cid for cid, _ in scored])))}  # fmt: skip
+    role, q = reader_role(user), tokens(query)
+    out, per_doc = [], Counter()
+    for cid, similarity in scored:
+        c, doc = found[cid]
+        if not _readable(doc, role, policy_type, on) or per_doc[doc.id] >= 2:
             continue
         per_doc[doc.id] += 1
-        out.append({
-            "chunk_id": c.id, "document_id": doc.id, "title": doc.title, "section": c.heading,
-            "snippet": _snippet(c.text, q), "text": c.text, "score": round(score, 3),
-            "source": doc.source, "status": doc.status, "jurisdiction": doc.jurisdiction,
-            "policy_type": doc.policy_type, "document_type": doc.document_type,
-            "effective_from": doc.effective_from and doc.effective_from.isoformat(),
-            "effective_to": doc.effective_to and doc.effective_to.isoformat(),
-        })  # fmt: skip
+        out.append(_passage(c, doc, q, similarity))
         if len(out) >= limit:
             break
     return out
@@ -311,8 +407,12 @@ def search(session: Session, user: Employee, query: str, policy_type: str | None
 
 def answer(session: Session, user: Employee, question: str,
            on: date | None = None) -> dict[str, Any]:  # fmt: skip
-    """Extractive answer: the best passages quoted with their sources (no invention)."""
-    passages = search(session, user, question, on=on or date.today(), limit=3)
+    """Extractive answer: the best passages quoted with their sources (no invention).
+
+    Passages come from the LangChain retriever (keyword + optional semantic search)."""
+    from payroll_copilot.services.policy_retriever import retrieve
+
+    passages = retrieve(session, user, question, on=on or date.today(), k=3)
     if not passages:
         return {"found": False, "passages": [],
                 "text": "I couldn't find this in the knowledge base. Please ask HR, or add the "

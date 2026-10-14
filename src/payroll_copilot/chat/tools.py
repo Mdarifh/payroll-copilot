@@ -8,12 +8,14 @@ Security rules enforced here (not in the prompt):
 * Every tool call is written to the audit log.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,6 +40,7 @@ ZERO = Decimal(0)
 EVERYONE = frozenset(Role)  # self-service tools: every logged-in user
 HR_ONLY = STAFF_ROLES  # payroll staff (any role that may view every employee's payroll)
 RUN_ROLES = roles_with(Perm.RUN_PAYROLL)
+MAX_CHAT_RUN = 50  # employees one chat message may run payroll for (more: Payroll Runs page)
 
 
 class ToolError(PayrollCopilotError):
@@ -56,6 +59,8 @@ class ToolContext:
     # saved conversation: follow-up context and the previous exchanges (after a restart)
     chat_context: dict[str, Any] = field(default_factory=dict)
     history: list[tuple[str, str]] = field(default_factory=list)
+    # LangGraph payroll run with HR approval (services.payroll_flow); None = not available
+    payroll_flow: Any = None
 
 
 @dataclass
@@ -136,6 +141,7 @@ class StartPayrollReviewArgs(_Args):
     month: str = Field(max_length=30)
     department: str | None = Field(default=None, max_length=100)
     work_state: str | None = Field(default=None, max_length=50)
+    employee_codes: list[str] | None = Field(default=None, max_length=MAX_CHAT_RUN)
 
     @field_validator("month")
     @classmethod
@@ -286,6 +292,12 @@ def start_payroll_review(ctx: ToolContext, args: StartPayrollReviewArgs) -> Tool
 
     from payroll_copilot.services import batch_service
 
+    if args.employee_codes is not None:  # only these employees: never the company-wide run
+        return selected_run(ctx, PayrollPeriod.parse(args.month), args.employee_codes)
+    if ctx.payroll_flow is not None:  # the approval workflow (pre-checks, LOP, approve, run)
+        card = ctx.payroll_flow.start(ctx.user, PayrollPeriod.parse(args.month),
+                                      args.department, args.work_state)  # fmt: skip
+        return ToolResult(content=flow_summary(card), cards=[card])
     with _Session(bind=ctx.session.get_bind(), expire_on_commit=False) as session:
         hr = session.get(Employee, ctx.user.id)
         batch = batch_service.start_review(session, hr, PayrollPeriod.parse(args.month),
@@ -297,6 +309,49 @@ def start_payroll_review(ctx: ToolContext, args: StartPayrollReviewArgs) -> Tool
                                     "No LOP review needed; HR can run payroll from the card"}
     return ToolResult(content=content, cards=[{"type": "bulk_lop_card", "batch_id":
                                                info["batch_id"], "summary": info}])
+
+
+def flow_summary(card: dict[str, Any]) -> dict[str, Any]:
+    """What the model (and the routed text) is told about a started payroll run."""
+    pc = card.get("prechecks") or {}
+    return {"month": card["month"], "scope": card["scope"], "employees": pc.get("employees"),
+            "blocked_by_failed_checks": [b["check"] for b in card["blockers"]],
+            "next_step": "Fix the failed pre-checks, then press Re-check in the card"
+                         if card["blockers"] else
+                         "HR reviews LOP and presses Approve & run in the card; payroll is NOT "
+                         "processed before that"}  # fmt: skip
+
+
+def selected_run(ctx: ToolContext, period: PayrollPeriod, codes: list[str]) -> ToolResult:
+    """A confirm card to run payroll for these employees only. Nothing runs here: HR checks
+    LOP, gives a reason and presses Run in the card (POST /payroll-runs/{month}/run-selected,
+    which refuses locked months and busy batches)."""
+    from payroll_copilot.services.payroll_runs import register
+
+    wanted = list(dict.fromkeys(c.strip().upper() for c in codes if c and c.strip()))
+    if not wanted:
+        raise ToolError("Give at least one employee code, e.g. EMP-101")
+    if len(wanted) > MAX_CHAT_RUN:
+        raise ToolError(f"At most {MAX_CHAT_RUN} employees from chat - use Payroll Runs > "
+                        "Run selected for more")  # fmt: skip
+    rows = register(ctx.session, period, page_size=len(wanted), codes=wanted)["items"]
+    found = {r["employee_code"] for r in rows}
+    skipped = [c for c in wanted if c not in found]  # unknown, or not employed that month
+    if not rows:
+        raise ToolError(f"No employee to run for {period.label}: {', '.join(skipped)} "
+                        "unknown or not employed that month")  # fmt: skip
+    locked = [r["employee_code"] for r in rows if r["status"] == "LOCKED"]
+    content = {
+        "month": str(period), "label": period.label,
+        "employees": [f"{r['full_name']} ({r['employee_code']})" for r in rows],
+        "skipped_unknown_or_not_employed": skipped, "finalized_locked": locked,
+        "next_step": "Reopen the month on Payroll Runs first (finalized payslips)" if locked else
+                     "HR checks LOP, gives a reason and presses Review & run in the card; "
+                     "only these employees are calculated, nothing has run yet",
+    }  # fmt: skip
+    card = {"type": "run_selected_card", "month": str(period), "label": period.label,
+            "rows": rows, "skipped": skipped}  # fmt: skip
+    return ToolResult(content=content, cards=[card])
 
 
 # ---------------------------------------------------------------------- explain / compare
@@ -421,6 +476,30 @@ def find_employee(ctx: ToolContext, args: FindEmployeeArgs) -> ToolResult:
          "department": e.department, "designation": e.designation} for e in found]})
 
 
+class PolicySearchArgs(_Args):
+    query: str = Field(min_length=2, max_length=300)
+
+
+KNOWLEDGE_PASSAGE_KEYS = ("title", "section", "snippet", "source", "status", "jurisdiction",
+                          "effective_from", "effective_to", "document_id")  # fmt: skip
+
+
+def search_policy_documents(ctx: ToolContext, args: PolicySearchArgs) -> ToolResult:
+    """RAG: policy passages from the LangChain retriever, quoted with their sources."""
+    from payroll_copilot.services.policy_retriever import retrieve
+
+    passages = retrieve(ctx.session, ctx.user, args.query, on=ctx.today, k=3)
+    if not passages:
+        return ToolResult(content={"found": False, "message": "No policy document in the "
+                                   "knowledge base answers this; suggest asking HR."})  # fmt: skip
+    content = {"found": True, "passages": [
+        {"title": p["title"], "section": p["section"], "text": p["text"], "source": p["source"],
+         "status": p["status"]} for p in passages]}  # fmt: skip
+    card = {"type": "knowledge_card", "question": args.query,
+            "passages": [{k: p[k] for k in KNOWLEDGE_PASSAGE_KEYS} for p in passages]}
+    return ToolResult(content=content, cards=[card])
+
+
 _COMPONENT_PARAM = {"type": "string", "enum": _COMPONENT_ENUM,
                     "description": "PF, ESIC, PT, TDS, LWF, LOP (days), GROSS or NET"}
 _EMP_PARAM = {"type": "string", "description": "Employee code (EMP-102) or name"}
@@ -460,13 +539,15 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         "start_payroll_review",
         "HR only. Start payroll for a month for ALL employees, or only a department "
-        "(e.g. Sales) or a state/office (e.g. Delhi). Finds absences without approved leave "
-        "and opens an LOP review card; payroll runs only after HR confirms in the card. "
-        "Returns counts only: total, ok_count, review_count.",
+        "(e.g. Sales), a state/office (e.g. Delhi) or named employees (employee_codes; use "
+        "find_employee first for names). Opens a review card; payroll runs only after HR "
+        "confirms in the card.",
         _schema({"month": _MONTH,
                  "department": {"type": "string", "description": "Only this department"},
                  "work_state": {"type": "string",
-                                "description": "Only this state or office, e.g. Delhi or DL"}},
+                                "description": "Only this state or office, e.g. Delhi or DL"},
+                 "employee_codes": {"type": "array", "items": {"type": "string"},
+                                    "description": "Only these employees, e.g. [\"EMP-101\"]"}},
                 ["month"]),
         StartPayrollReviewArgs, RUN_ROLES, start_payroll_review,
     ),  # fmt: skip
@@ -513,6 +594,16 @@ TOOLS: list[ToolSpec] = [
                 ["emp_id", "first_month", "second_month"]),
         EmployeeCompareArgs, HR_ONLY, compare_employee_months,
     ),
+    ToolSpec(
+        "search_policy_documents",
+        "Search the company's policy documents (leave, attendance / LOP, overtime, payroll "
+        "SOP, salary structure, arrears, F&F, PF / ESIC / PT / LWF rule notes) and get the "
+        "matching passages with their sources. Use it for any policy or 'how does X work' "
+        "question; quote the passage and name the document.",
+        _schema({"query": {"type": "string", "description": "The question in plain English"}},
+                ["query"]),
+        PolicySearchArgs, EVERYONE, search_policy_documents,
+    ),  # fmt: skip
 ]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 
@@ -549,3 +640,29 @@ def run_tool(ctx: ToolContext, name: str, raw_args: dict[str, Any] | None) -> To
     except PayrollCopilotError as exc:
         raise ToolError(f"{name} failed: {exc}") from exc
 
+
+# ---------------------------------------------------------------------- LangChain
+
+
+def langchain_tools(ctx: ToolContext, specs: list[ToolSpec] | None = None) -> list[StructuredTool]:
+    """The tools as LangChain ``StructuredTool``s bound to this request's user.
+
+    Each returns ``(content, artifact)``: the content (JSON) is what the model reads, the
+    artifact carries the UI cards and an error flag - so cards never pass through the
+    model. ``run_tool`` still validates, checks the role and audits every call.
+    """
+
+    def make(spec: ToolSpec) -> StructuredTool:
+        def call(**arguments: Any) -> tuple[str, dict[str, Any]]:
+            try:
+                out = run_tool(ctx, spec.name, arguments)
+            except ToolError as exc:
+                return f"ERROR: {exc}", {"cards": [], "is_error": True}
+            return json.dumps(out.content), {"cards": out.cards, "is_error": False}
+
+        return StructuredTool.from_function(func=call, name=spec.name,
+                                            description=spec.description,
+                                            args_schema=spec.parameters,
+                                            response_format="content_and_artifact")  # fmt: skip
+
+    return [make(spec) for spec in (TOOLS if specs is None else specs)]

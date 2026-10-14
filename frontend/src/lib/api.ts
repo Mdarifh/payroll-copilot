@@ -79,6 +79,88 @@ export function sendChat(
   );
 }
 
+export type StreamEvent =
+  | { event: "status"; text: string }
+  | { event: "token"; text: string }
+  | { event: "reset" }
+  | ({ event: "done" } & ChatResponse)
+  | { event: "error"; status: number; detail: string };
+
+/** POST /chat/stream: calls onEvent for every server-sent event; resolves with the final reply. */
+export async function streamChat(
+  token: string,
+  message: string,
+  conversationId: string | null,
+  onEvent: (event: StreamEvent) => void,
+): Promise<ChatResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/chat/stream`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(conversationId ? { message, conversation_id: conversationId } : { message }),
+    });
+  } catch {
+    throw new ApiError(0, "Cannot reach the payroll server. Is the API window still open?");
+  }
+  if (!response.ok || !response.body) {
+    let detail = response.status >= 500 ? "The payroll server is not running." : response.statusText;
+    try { detail = (await response.json()).detail ?? detail; } catch { /* not JSON */ }
+    throw new ApiError(response.status, typeof detail === "string" ? detail : "Request failed");
+  }
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let end: number;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const line = buffer.slice(0, end).trim();
+      buffer = buffer.slice(end + 2);
+      if (!line.startsWith("data: ")) continue;
+      const event = JSON.parse(line.slice(6)) as StreamEvent;
+      if (event.event === "error") throw new ApiError(event.status, event.detail);
+      if (event.event === "done") {
+        const { event: _, ...reply } = event;
+        return reply;
+      }
+      onEvent(event);
+    }
+  }
+  throw new ApiError(0, "The answer was cut off. Please try again.");
+}
+
+// ---------------------------------------------------------------- payroll run with approval
+
+export interface PayrollFlowCheck { key: string; label: string; status: "PASS" | "WARNING" | "FAIL"; passed: number; warnings: number; failed: number }
+export interface PayrollFlowCard {
+  type: "payroll_flow_card";
+  flow_id: string;
+  stage: "approval" | "running" | "done" | "cancelled" | "error";
+  month: string;
+  label: string;
+  scope: string;
+  started_by: string | null;
+  prechecks: { label: string; employees: number; already_processed: number; checks: PayrollFlowCheck[]; notes: string[] } | null;
+  blockers: { check: string; count: number; employees: { code: string; name: string; message: string }[] }[];
+  batch_id: string | null;
+  run: BatchStatus | null;
+  validation: { errors: number; warnings: number; passed: number; stage: string | null; note?: string } | null;
+  totals: { employees: number; gross: string; net: string } | null;
+  error: string | null;
+  steps: string[];
+}
+export type FlowDecision =
+  | { action: "approve"; mode: "APPLY" | "SKIP_ALL"; reason?: string }
+  | { action: "recheck" | "cancel" | "continue" | "retry" };
+
+export const getPayrollFlow = (token: string, id: string) =>
+  request<PayrollFlowCard>(`/payroll-flows/${encodeURIComponent(id)}`, {}, token);
+export const resumePayrollFlow = (token: string, id: string, decision: FlowDecision) =>
+  request<PayrollFlowCard>(`/payroll-flows/${encodeURIComponent(id)}/resume`,
+    { method: "POST", body: JSON.stringify(decision) }, token);
+
 export interface ChatSessionSummary { id: string; title: string; updated_at: string | null; messages: number }
 
 export const chatSessions = (token: string) => request<ChatSessionSummary[]>("/chat/sessions", {}, token);
@@ -242,6 +324,8 @@ export interface SalaryDetails {
   message?: string;
   effective_from?: string;
   revised_in_month?: boolean;
+  /** the next salary revision after this month (e.g. approved today, from next month) */
+  next_revision?: { effective_from: string; monthly_gross: string; month: string; month_label: string; viewable: boolean } | null;
   revisions?: { effective_from: string; monthly_gross: string }[];
   monthly_gross?: string;
   annual_gross?: string;
@@ -392,6 +476,10 @@ export interface PayrollMonth {
 export interface RunBatch extends BatchStatus {
   created_at: string | null; created_by: string | null;
   approved_by: string | null; finalized_by: string | null;
+  /** pay of the payslips THIS run calculated (the month total is on the month) */
+  batch_gross: string; batch_net: string;
+  /** maker-checker: may the logged-in user approve this run? */
+  prepared_by_me: boolean; can_approve: boolean; approve_blocked_reason: string | null;
 }
 
 export interface MonthDetail extends Omit<PayrollMonth, "batches"> { batches: RunBatch[] }
